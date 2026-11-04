@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.envv
+.envv.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Alembic
+migrations/versions/*.py
+!migrations/versions/001_initial.py
+
+# Logs
+*.log
+
+# Telegram
+bot_off*
+bot_status.json
+bot_off.off
+*.off
+telegram-webapp-session
+
+# Render
+render_key.txt
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local files
+TEST_БОТ_ТОКЕН.txt

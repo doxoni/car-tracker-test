@@ -1,0 +1,36 @@
+# -*- coding: utf-8 -*-
+# render.yaml — конфигурация деплоя на Render.com
+# Подключение Mini App: BotFather -> Bot Settings -> Menu Button -> Web App URL
+
+services:
+  - type: web
+    name: car-tracker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app/main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+      - key: WHITELISTED_TELEGRAM_IDS
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:///cars.db
+      - key: WIALON_TOKEN
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: car-tracker
+          property: host
+    healthCheckPath: /api/dashboard?period=month
+
+databases:
+  - name: cars-db
+    plan: free
+    databaseName: cars
+    user: car_tracker

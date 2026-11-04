@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Car Tracker — учёт фур</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+</head>
+<body>
+  <!-- Telegram Web App header -->
+  <header class="tg-header">
+    <div class="tg-header-left">🚚 Car Tracker</div>
+    <div class="tg-header-right" id="user-badge">Загрузка…</div>
+  </header>
+
+  <main class="app-main" id="app-main">
+    <!-- Скелетоны при загрузке -->
+    <div class="skeleton-wrap" id="skeleton">
+      <div class="skeleton-line w-full"></div>
+      <div class="skeleton-line w-60"></div>
+      <div class="skeleton-line w-80"></div>
+    </div>
+  </main>
+
+  <!-- Нижняя навигация -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a class="nav-item active" data-tab="dashboard" href="#dashboard">
+      <span class="nav-icon">📊</span>
+      <span class="nav-label">Главная</span>
+    </a>
+    <a class="nav-item" data-tab="vehicles" href="#vehicles">
+      <span class="nav-icon">🚚</span>
+      <span class="nav-label">Фуры</span>
+    </a>
+    <a class="nav-item" data-tab="expenses" href="#expenses">
+      <span class="nav-icon">💸</span>
+      <span class="nav-label">Расходы</span>
+    </a>
+    <a class="nav-item" data-tab="barrels" href="#barrels">
+      <span class="nav-icon">⛽</span>
+      <span class="nav-label">Бочки</span>
+    </a>
+    <a class="nav-item" data-tab="reports" href="#reports">
+      <span class="nav-icon">📄</span>
+      <span class="nav-label">Отчёты</span>
+    </a>
+  </nav>
+
+  <!-- MainButton от Telegram (кнопка действия) -->
+  <div id="main-button-wrap" style="display:none;"></div>
+
+  <div id="flash" style="display:none; position:fixed; top:70px; left:50%; transform:translateX(-50%);
+    background:var(--tg-theme-button-color); color:var(--tg-theme-button-text-color);
+    padding:8px 14px; border-radius:12px; font-size:14px; z-index:50; box-shadow:0 4px 12px rgba(0,0,0,.15);">
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
