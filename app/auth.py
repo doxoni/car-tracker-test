@@ -12,12 +12,12 @@ from functools import wraps
 
 from flask import request, g, jsonify
 
-from .config import TELEGRAM_TOKEN
+from app.config import Config
 
 
 def get_secret_key():
     """Вернуть секретный ключ (тоже самое что в BotFather)."""
-    return TELEGRAM_TOKEN.strip() if TELEGRAM_TOKEN else ""
+    return Config.TELEGRAM_TOKEN.strip() if Config.TELEGRAM_TOKEN else ""
 
 
 def _verify_hmac(init_data: dict, secret_key: str) -> bool:
@@ -39,7 +39,7 @@ def verify_telegram_init_data(init_data: dict) -> bool:
 
 
 def require_auth(f):
-    """Требует валидного initData. Класть в g.current_user и g.is_admin."""
+    """Требует валидного initData. Класть в g.current_user, g.current_user_level."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -51,26 +51,58 @@ def require_auth(f):
         g.current_tg_id = tg_user
 
         try:
-            from .models import User
+            from app.models import User
             u = User.query.filter_by(tg_id=tg_user).first()
             g.current_user = u
-            g.is_admin = u is not None and u.is_admin()
+            g.current_user_level = u.level if u else 1
         except Exception:
             g.current_user = None
-            g.is_admin = False
+            g.current_user_level = 1
 
         return f(*args, **kwargs)
 
     return decorated
 
 
-def require_admin(f):
-    """Доступ только администраторам (белый список)."""
+def require_level(min_level: int):
+    """Требует уровень пользователя >= min_level (1=user, 2=operator, 3=super_admin)."""
+
+    def decorator(f):
+        @wraps(f)
+        @require_auth
+        def decorated(*args, **kwargs):
+            level = getattr(g, "current_user_level", 1)
+            if level < min_level:
+                return jsonify({"error": "forbidden"}), 403
+            return f(*args, **kwargs)
+
+        return decorated
+
+    return decorator
+
+
+def require_can_view_logs(f):
+    """Доступ к просмотру аудит-логов (уровни 2 и 3)."""
 
     @wraps(f)
     @require_auth
     def decorated(*args, **kwargs):
-        if not g.is_admin:
+        level = getattr(g, "current_user_level", 1)
+        if level not in (2, 3):
+            return jsonify({"error": "forbidden"}), 403
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def require_can_clear_logs(f):
+    """Доступ к удалению аудит-логов (только уровень 3)."""
+
+    @wraps(f)
+    @require_auth
+    def decorated(*args, **kwargs):
+        level = getattr(g, "current_user_level", 1)
+        if level != 3:
             return jsonify({"error": "forbidden"}), 403
         return f(*args, **kwargs)
 

@@ -4,14 +4,19 @@
 Запуск: `python app/main.py`
 """
 
-from . import create_app
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import create_app
 
 
 application = create_app()
 
 
 def main():
-    application.run(host="0.0.0.0", port=5000)
+    application.run(host="0.0.0.0", port=5000, ssl_context='adhoc')
 
 
 if __name__ == "__main__":
