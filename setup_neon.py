@@ -82,7 +82,7 @@ def existing_project(key: str, org_id: str):
     return None
 
 
-def build_url(data: dict) -> str:
+def build_url(data: dict, key: str) -> str:
     """Собрать строку подключения из ответа Neon.
 
     В connection_uri пароль может быть замаскирован, поэтому берём
@@ -118,8 +118,10 @@ def build_url(data: dict) -> str:
 
     host = params.get("host") or ""
     host = host.replace("-pooler.", ".")
+    if not host:
+        fail("Neon не вернул адрес хоста")
     database = params.get("database") or "neondb"
-    role = params.get("role") or "neondb_owner"
+    role = params.get("role") or params.get("user") or "neondb_owner"
 
     return (
         f"postgresql://{quote(role, safe='')}:{quote(password, safe='')}"
@@ -145,29 +147,6 @@ def main():
     if project:
         print(f"  проект уже есть: {project['name']}")
         project_id = project["id"]
-        branches = api("GET", f"/projects/{project_id}/branches", key)
-        branch = branches["branches"][0]
-        data = {
-            "project": {"id": project_id},
-            "connection_uris": [
-                {
-                    "connection_parameters": {
-                        "host": branch["connection_uri"].split("@")[-1].split("/")[0].split("?")[0],
-                        "database": "neondb",
-                        "role": "neondb_owner",
-                    }
-                }
-            ],
-            "roles": [{"branch_id": branch["id"], "name": "neondb_owner"}],
-        }
-        # Пароль роли берём из ответа по роли.
-        role_data = api(
-            "GET",
-            f"/projects/{project_id}/branches/{branch['id']}/roles/neondb_owner/reveal_password",
-            key,
-        )
-        data["roles"][0]["password"] = role_data.get("password", "")
-        url = build_url(data)
     else:
         response = api(
             "POST",
@@ -183,8 +162,48 @@ def main():
             },
         )
         project = response["project"]
-        print(f"  создан проект: {project['name']} ({project['id']})")
-        url = build_url(response)
+        project_id = project["id"]
+        print(f"  создан проект: {project['name']} ({project_id})")
+
+    # Ветка по умолчанию - к ней и относится строка подключения.
+    branches = api("GET", f"/projects/{project_id}/branches", key)
+    branch = None
+    for item in branches.get("branches", []):
+        if item.get("default"):
+            branch = item
+            break
+    if branch is None and branches.get("branches"):
+        branch = branches["branches"][0]
+    if branch is None:
+        fail("У проекта Neon нет ни одной ветки")
+
+    # Параметры подключения берём у проекта - так надёжнее, чем
+    # разбирать строку connection_uri вручную.
+    conn = api("GET", f"/projects/{project_id}/connection_uri", key)
+    uris = conn.get("connection_uris") or []
+    if not uris:
+        fail("Neon не вернул строку подключения для проекта")
+    params = uris[0].get("connection_parameters") or {}
+    role_name = params.get("role") or "neondb_owner"
+
+    # Пароль роли не отдают в открытом виде - запрашиваем отдельно.
+    role_data = api(
+        "GET",
+        f"/projects/{project_id}/branches/{branch['id']}/roles/{role_name}/reveal_password",
+        key,
+    )
+    data = {
+        "project": {"id": project_id},
+        "connection_uris": [{"connection_parameters": params}],
+        "roles": [
+            {
+                "branch_id": branch["id"],
+                "name": role_name,
+                "password": role_data.get("password", ""),
+            }
+        ],
+    }
+    url = build_url(data, key)
 
     OUT_FILE.write_text(
         "# Neon connection - car-tracker\n" f"DATABASE_URL={url}\n",

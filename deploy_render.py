@@ -68,7 +68,10 @@ def read_connection() -> str:
         conn_file = ROOT / name
         if not conn_file.exists():
             continue
-        for line in conn_file.read_text(encoding="utf-8").splitlines():
+        # Файл мог быть записан в Windows PowerShell 5.1 - там UTF-8 с BOM,
+        # и в начале первой строки остаётся невидимый символ.
+        text = conn_file.read_text(encoding="utf-8-sig")
+        for line in text.splitlines():
             if line.startswith("DATABASE_URL="):
                 url = line.split("=", 1)[1].strip()
                 if url:
@@ -99,7 +102,8 @@ def read_render_env() -> dict:
     values = {}
     env_file = ROOT / "render_env.txt"
     if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+        # utf-8-sig: файл мог быть сохранён в PowerShell 5.1 (UTF-8 с BOM).
+        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
@@ -109,7 +113,7 @@ def read_render_env() -> dict:
     # Локальный .env - чтобы токен бота не пришлось вписывать дважды.
     dotenv_file = ROOT / ".env"
     if dotenv_file.exists():
-        for line in dotenv_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in dotenv_file.read_text(encoding="utf-8-sig", errors="replace").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
