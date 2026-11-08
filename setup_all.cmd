@@ -1,34 +1,47 @@
 @echo off
-REM setup_all.cmd - full car-tracker setup: Cloud SQL database + Render deploy.
+REM setup_all.cmd - полная настройка car-tracker: облачная база + деплой на Render.
 REM
-REM Run (double-click, or from PowerShell):
+REM Запуск (двойной клик или из PowerShell):
 REM     .\setup_all.cmd 123456789
 REM
-REM The number is your Telegram ID - it becomes the admin (level 3).
+REM Число - это твой Telegram ID, из него делается админ (уровень 3).
 REM
-REM What it does:
-REM   1. Creates the database in Google Cloud SQL (needs a Google billing account).
-REM   2. Creates/updates the service on Render, sets DATABASE_URL, deploys.
-REM   3. Creates the admin account in the database.
+REM Что делает:
+REM   1. Создаёт облачную базу PostgreSQL (Google Cloud SQL, а если нет
+REM      биллинга Google - Neon, там карта не нужна).
+REM   2. Создаёт/обновляет сервис на Render, ставит DATABASE_URL, деплоит.
+REM   3. Создаёт админа в базе.
 REM
-REM Prepare once:
-REM   - render_key.txt   - Render API key (https://dashboard.render.com/account/api-keys)
+REM Подготовь один раз:
+REM   - render_key.txt   - ключ Render API (https://dashboard.render.com/account/api-keys)
 REM   - render_env.txt   - TELEGRAM_TOKEN, ADMIN_TELEGRAM_ID, WHITELISTED_TELEGRAM_IDS
 
 setlocal
 cd /d "%~dp0"
 
 echo ============================================================
-echo  car-tracker setup: Google Cloud SQL + Render
+echo  car-tracker setup: облачная база + Render
 echo ============================================================
 echo.
 
 if "%1"=="" (
-  powershell -ExecutionPolicy Bypass -File "%~dp0setup_cloud_sql.ps1"
+  powershell -ExecutionPolicy Bypass -File "%~dp0setup_db.ps1"
 ) else (
-  powershell -ExecutionPolicy Bypass -File "%~dp0setup_cloud_sql.ps1" -TelegramId %1
+  powershell -ExecutionPolicy Bypass -File "%~dp0setup_db.ps1"
 )
-if errorlevel 2 goto :no_billing
+if errorlevel 2 goto :no_db
+if errorlevel 1 goto :error
+
+echo.
+echo ============================================================
+echo  Deploying to Render
+echo ============================================================
+echo.
+if "%1"=="" (
+  python "%~dp0deploy_render.py"
+) else (
+  python "%~dp0deploy_render.py" --telegram-id %1
+)
 if errorlevel 1 goto :error
 
 echo.
@@ -37,10 +50,10 @@ echo  DONE. Check the Render dashboard for the service URL.
 echo ============================================================
 goto :end
 
-:no_billing
+:no_db
 echo.
-echo A Google Cloud billing account is required - see the steps above.
-echo Create it and run this command again.
+echo Database was not set up - see the steps above.
+echo Finish them and run this command again.
 goto :end
 
 :error

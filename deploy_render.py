@@ -2,8 +2,8 @@
 """Деплой car-tracker на Render через Render API.
 
 Что делает:
-  1. Берёт DATABASE_URL из .cloudsql_connection.txt (создаётся скриптом
-     setup_cloud_sql.ps1).
+  1. Берёт DATABASE_URL из .db_connection.txt (создаётся скриптом
+     setup_db.ps1).
   2. Создаёт сервис на Render из репозитория doxoni/car-tracker-test
      (ветка test) или обновляет существующий.
   3. Ставит переменные окружения и запускает деплой.
@@ -72,11 +72,22 @@ def read_connection() -> str:
             if line.startswith("DATABASE_URL="):
                 url = line.split("=", 1)[1].strip()
                 if url:
-                    return url
+                    return normalize_url(url)
     fail(
         "Нет файла .db_connection.txt с подключением к БД.\n"
         "  Сначала создай базу: powershell -ExecutionPolicy Bypass -File setup_db.ps1"
     )
+
+
+def normalize_url(url: str) -> str:
+    """Привести строку подключения к виду, который понимает SQLAlchemy.
+
+    Некоторые хостинги отдают схему postgres:// - SQLAlchemy 2.x ждёт
+    postgresql://.
+    """
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://"):]
+    return url
 
 
 def read_render_env() -> dict:

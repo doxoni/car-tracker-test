@@ -71,6 +71,9 @@ telegram-webapp-session
 render_key.txt
 render_env.txt
 
+# Neon
+neon_key.txt
+
 # Google Cloud
 .cloudsql_connection.txt
 .db_connection.txt
