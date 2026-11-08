@@ -22,4 +22,4 @@ def post_worker_init(worker):
     """Запустить Telegram-бота в воркере, который обслуживает запросы."""
     from app.bot_runner import ensure_bot_started
 
-    ensure_bot_started()
+    ensure_bot_started("gunicorn")

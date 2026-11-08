@@ -133,18 +133,42 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+def _as_coroutine(callback):
+    """Обернуть обычную функцию в корутину.
+
+    python-telegram-bot ждёт из post_init/post_stop именно корутину:
+    если вернуть обычный результат, он падает с ошибкой
+    "An asyncio.Future, a coroutine or an awaitable is required".
+    """
+    import asyncio
+    import inspect
+
+    if callback is None:
+        return None
+
+    async def _wrapper(application):
+        result = callback(application)
+        if inspect.isawaitable(result):
+            await result
+
+    return _wrapper
+
+
 def build_app(on_ready=None, on_stop=None):
     """Создаёт Telegram-приложение (Application).
 
     on_ready - вызывается, когда бот подключился к Telegram (getMe прошёл);
     on_stop  - вызывается, когда опрос остановлен.
     Оба нужны, чтобы /api/health показывал реальное состояние бота.
+    Колбэки могут быть как обычными функциями, так и корутинами.
     """
     builder = ApplicationBuilder().token(TELEGRAM_TOKEN)
-    if on_ready is not None:
-        builder = builder.post_init(on_ready)
-    if on_stop is not None:
-        builder = builder.post_stop(on_stop)
+    ready = _as_coroutine(on_ready)
+    stop = _as_coroutine(on_stop)
+    if ready is not None:
+        builder = builder.post_init(ready)
+    if stop is not None:
+        builder = builder.post_stop(stop)
     application = builder.build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("barrels", barrels_cmd))

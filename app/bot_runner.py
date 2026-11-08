@@ -100,6 +100,10 @@ def _heartbeat_loop() -> None:
     в /api/health.
     """
     while True:
+        # Поток бота умер - обновлять heartbeat больше нечего, иначе в
+        # /api/health будет видно живого бота, хотя он не работает.
+        if _bot_thread is None or not _bot_thread.is_alive():
+            return
         BOT_STATE["heartbeat"] = time.time()
         time.sleep(5)
 
@@ -257,12 +261,18 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
             _stage("импорт модуля бота")
             from bot.bot import build_app as build_bot
 
-            def _on_ready(application):
-                """Бот подключился к Telegram: getMe прошёл, опрос идёт."""
+            async def _on_ready(application):
+                """Бот подключился к Telegram: getMe прошёл, опрос идёт.
+
+                Колбэк обязан быть корутиной: python-telegram-bot ждёт
+                awaitable из post_init/post_stop, и обычная функция
+                приводит к ошибке "An asyncio.Future, a coroutine or an
+                awaitable is required".
+                """
                 BOT_STATE["status"] = "running"
                 _stage("опрос Telegram идёт")
 
-            def _on_stop(application):
+            async def _on_stop(application):
                 """Опрос остановлен."""
                 BOT_STATE["status"] = "stopped"
                 _stage("опрос остановлен")
