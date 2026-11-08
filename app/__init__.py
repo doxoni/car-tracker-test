@@ -25,6 +25,27 @@ def _parse_init_data():
     request.init_data = {k: v[0] for k, v in parsed.items()}
 
 
+def _init_db(app, attempts: int = 10, delay: float = 5.0):
+    """Создать таблицы, дожидаясь готовности БД.
+
+    Cloud SQL может быть ещё не готов к первому подключению после деплоя,
+    поэтому повторяем попытки с задержкой.
+    """
+    import time
+    from sqlalchemy.exc import OperationalError
+
+    for attempt in range(1, attempts + 1):
+        try:
+            with app.app_context():
+                db.create_all()
+            return
+        except OperationalError as e:
+            print(f"⚠️ БД недоступна (попытка {attempt}/{attempts}): {e}")
+            if attempt == attempts:
+                raise
+            time.sleep(delay)
+
+
 def create_app():
     """Создаёт экземпляр Flask приложения с настройками."""
     app = Flask(__name__)
@@ -37,7 +58,6 @@ def create_app():
     from .routes import bp as routes_bp
     app.register_blueprint(routes_bp)
 
-    with app.app_context():
-        db.create_all()
+    _init_db(app)
 
     return app

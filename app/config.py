@@ -6,16 +6,57 @@
 """
 
 import os
+from urllib.parse import quote
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
+def _build_database_uri():
+    """Собрать строку подключения к БД.
+
+    Поддерживаются варианты:
+    - DATABASE_URL — готовая строка (Render, Cloud SQL, локально)
+    - DB_HOST + DB_PORT + DB_NAME + DB_USER + DB_PASSWORD — Cloud SQL по частям
+    - иначе — локальный SQLite
+    """
+    url = (os.getenv("DATABASE_URL") or "").strip()
+    if url:
+        # Некоторые платформы отдают схему postgres:// — SQLAlchemy 2.x ждёт postgresql://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        return url
+
+    host = (os.getenv("DB_HOST") or "").strip()
+    if host:
+        port = (os.getenv("DB_PORT") or "5432").strip()
+        name = (os.getenv("DB_NAME") or "cars").strip()
+        user = (os.getenv("DB_USER") or "").strip()
+        password = (os.getenv("DB_PASSWORD") or "").strip()
+        sslmode = (os.getenv("DB_SSLMODE") or "require").strip()
+        creds = user
+        if password:
+            creds = f"{quote(user, safe='')}:{quote(password, safe='')}"
+        return f"postgresql://{creds}@{host}:{port}/{name}?sslmode={sslmode}"
+
+    return "sqlite:///cars.db"
+
+
 class Config:
     """Конфигурация приложения."""
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///cars.db")
+    SQLALCHEMY_DATABASE_URI = _build_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Пул соединений: Cloud SQL рвёт простаивающие соединения, поэтому
+    # pool_pre_ping проверяет соединение перед использованием.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+        "pool_size": 5,
+        "max_overflow": 10,
+    }
 
     # Telegram
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")

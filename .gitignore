@@ -69,6 +69,11 @@ telegram-webapp-session
 # Render
 render_key.txt
 
+# Google Cloud
+.cloudsql_connection.txt
+gcloud-key.json
+*.service-account.json
+
 # Tests
 .pytest_cache/
 .coverage
