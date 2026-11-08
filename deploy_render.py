@@ -43,19 +43,17 @@ def fail(message: str):
 
 
 def read_key() -> str:
-    """Ключ Render API: из переменной окружения или из render_key.txt."""
+    """Ключ Render API: из переменной окружения или из render_key.txt.
+
+    Если ключа нет - возвращается пустая строка: скрипт тогда не падает,
+    а печатает ручной порядок действий (см. print_manual_steps).
+    """
     key = (os.getenv("RENDER_API_KEY") or "").strip()
     if key:
         return key
     key_file = ROOT / "render_key.txt"
     if key_file.exists():
         key = key_file.read_text(encoding="utf-8").strip()
-    if not key:
-        fail(
-            "Не найден Render API ключ.\n"
-            "  Создай его: https://dashboard.render.com/account/api-keys\n"
-            "  И вставь в файл render_key.txt или в переменную RENDER_API_KEY."
-        )
     return key
 
 
@@ -194,6 +192,54 @@ def wait_for_deploy(service_id: str, key: str, timeout: int = 900):
     return False
 
 
+def print_manual_steps(extra: dict):
+    """Печатает порядок действий, если ключа Render API нет.
+
+    Ключ можно и не заводить: сервис создаётся вручную через Blueprint
+    (Render сам прочитает render.yaml), а DATABASE_URL вставляется руками.
+    Секреты в консоль не выводятся - только названия файлов, откуда их взять.
+    """
+    print("")
+    print("=" * 60)
+    print("КЛЮЧА RENDER API НЕТ - ДЕПЛОЙ ВРУЧНУЮ (5 минут)")
+    print("=" * 60)
+    print("")
+    print("1. Открой https://dashboard.render.com и залогинься.")
+    print("2. New -> Blueprint -> выбери репозиторий doxoni/car-tracker-test,")
+    print("   ветку test. Render сам прочитает render.yaml из репозитория.")
+    print("3. Когда попросит значения переменных, вставь:")
+    print("")
+    print("   DATABASE_URL - скопируй строку DATABASE_URL=... из файла")
+    print("                 .cloudsql_connection.txt (лежит в папке проекта)")
+    if extra:
+        print("   TELEGRAM_TOKEN и прочее - скопируй из файла render_env.txt")
+    print("")
+    print("   Остальные переменные render.yaml заполнятся сами.")
+    print("")
+    print("4. Нажми Create. Через пару минут сервис поднимется.")
+    print("5. Проверь: https://car-tracker-test.onrender.com/api/health")
+    print("")
+    print("Чтобы в следующий раз всё делалось автоматически, положи ключ")
+    print("Render в файл render_key.txt и запусти setup_all.cmd ещё раз.")
+    print("=" * 60)
+
+
+def create_admin(database_url: str, telegram_id: int, name: str):
+    """Создать админа (уровень 3) в базе Cloud SQL."""
+    import subprocess
+
+    os.environ["DATABASE_URL"] = database_url
+    print("")
+    print("=== Создаю админа ===")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "create_admin.py"), str(telegram_id), name, "3"],
+        cwd=str(ROOT),
+        env=os.environ,
+    )
+    if result.returncode != 0:
+        print("Не удалось создать админа (см. вывод выше)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Деплой car-tracker на Render")
     parser.add_argument("--telegram-id", type=int, default=0, help="Telegram ID админа (уровень 3)")
@@ -201,9 +247,16 @@ def main():
     parser.add_argument("--no-wait", action="store_true", help="Не ждать завершения деплоя")
     args = parser.parse_args()
 
-    key = read_key()
     database_url = read_connection()
     extra = read_render_env()
+
+    key = read_key()
+    if not key:
+        print_manual_steps(extra)
+        # Админа в базе всё равно создаём - БД уже доступна.
+        if args.telegram_id:
+            create_admin(database_url, args.telegram_id, args.name)
+        return
 
     print("=== Render deploy ===")
     owner_id = find_owner(key)
@@ -258,18 +311,7 @@ def main():
     print(f"Health: https://{service['serviceDetails']['host']}/api/health")
 
     if args.telegram_id:
-        os.environ["DATABASE_URL"] = database_url
-        print("")
-        print("=== Создаю админа ===")
-        import subprocess
-
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "create_admin.py"), str(args.telegram_id), args.name, "3"],
-            cwd=str(ROOT),
-            env=os.environ,
-        )
-        if result.returncode != 0:
-            print("Не удалось создать админа (см. вывод выше)")
+        create_admin(database_url, args.telegram_id, args.name)
 
 
 if __name__ == "__main__":

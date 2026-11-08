@@ -34,10 +34,12 @@ def client():
 
 
 def test_health(client):
-    """Health check отвечает без авторизации."""
+    """Health check отвечает без авторизации и проверяет БД."""
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.get_json() == {"status": "ok"}
+    data = response.get_json()
+    assert data["status"] == "ok"
+    assert data["database"] == "ok"
 
 
 def test_miniapp_page(client):

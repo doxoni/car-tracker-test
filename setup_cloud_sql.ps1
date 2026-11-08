@@ -1,4 +1,4 @@
-# setup_cloud_sql.ps1 - создаёт Google Cloud SQL PostgreSQL для car-tracker.
+﻿# setup_cloud_sql.ps1 - создаёт Google Cloud SQL PostgreSQL для car-tracker.
 #
 # Запуск в PowerShell из папки проекта:
 #   powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1
@@ -15,7 +15,8 @@
 # Запуск с Telegram ID админа (создаст админа уровня 3):
 #   powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1 -TelegramId 123456789
 #
-# NOTE: ASCII-only on purpose so PowerShell 5.1 reads it on any code page.
+# NOTE: файл сохранён в UTF-8 с BOM - так Windows PowerShell 5.1 (которым
+# запускается setup_all.cmd) правильно читает русский текст.
 
 param(
     [string]$TelegramId = ""
@@ -193,23 +194,27 @@ Write-Host "DONE. Connection saved to: $outFile" -ForegroundColor Green
 Write-Host ""
 Write-Host "DATABASE_URL=$url" -ForegroundColor Yellow
 
-# ---------- 8. Render deploy (если есть API-ключ) ----------
+# ---------- 8. Render deploy ----------
+# deploy_render.py сам разберётся: с ключом Render (render_key.txt) он создаёт
+# сервис и деплоит сам, без ключа - печатает пошаговую инструкцию.
 $renderKeyFile = Join-Path $PSScriptRoot "render_key.txt"
+Write-Host ""
+Step "Deploying to Render"
 if (Test-Path $renderKeyFile) {
-    Write-Host ""
-    Step "Deploying to Render"
     $env:RENDER_API_KEY = ((Get-Content $renderKeyFile -Raw).Trim())
-    if ($TelegramId -match "^\d+$") {
-        python (Join-Path $PSScriptRoot "deploy_render.py") --telegram-id $TelegramId
-    } else {
-        python (Join-Path $PSScriptRoot "deploy_render.py")
-    }
-    Remove-Item Env:\RENDER_API_KEY
-} else {
-    Write-Host ""
-    Write-Host "Render: key not found in render_key.txt - skipping deploy." -ForegroundColor Yellow
-    Write-Host "Put your Render API key (rnd_...) into render_key.txt and run:"
-    Write-Host "  python deploy_render.py"
 }
+if ($TelegramId -match "^\d+$") {
+    python (Join-Path $PSScriptRoot "deploy_render.py") --telegram-id $TelegramId
+} else {
+    python (Join-Path $PSScriptRoot "deploy_render.py")
+}
+$deployCode = $LASTEXITCODE
+if (Test-Path Env:\RENDER_API_KEY) { Remove-Item Env:\RENDER_API_KEY }
+if ($deployCode -ne 0) {
+    Write-Host ""
+    Write-Host "Render deploy failed (exit $deployCode)." -ForegroundColor Red
+    exit $deployCode
+}
+
 Write-Host ""
 Write-Host "DONE." -ForegroundColor Green

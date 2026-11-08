@@ -40,8 +40,17 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 @bp.get("/health")
 def health():
-    """Простой health check для Render (не требует авторизации)."""
-    return jsonify({"status": "ok"})
+    """Health check для Render: проверяет не только процесс, но и БД.
+
+    Заодно держит соединение с Cloud SQL живым - иначе инстанс на
+    бесплатном тарифе может осесть после недели без запросов.
+    """
+    try:
+        db.session.execute(db.text("SELECT 1"))
+        db.session.rollback()
+    except Exception as exc:
+        return jsonify({"status": "error", "database": "unavailable", "detail": str(exc)[:200]}), 503
+    return jsonify({"status": "ok", "database": "ok"})
 
 
 @web_bp.get("/")
