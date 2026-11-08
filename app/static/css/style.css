@@ -281,9 +281,9 @@ select {
 .field-input,
 .field-select {
   width: 100%;
-  flex: 1 1 160px;
-  min-width: 0;
 }
+/* Поле комментария — выше обычного поля. */
+textarea.field-input { min-height: 100px; }
 small { color: var(--hint); font-size: 13px; }
 
 /* ---------- Нижняя навигация ---------- */
@@ -441,6 +441,9 @@ small { color: var(--hint); font-size: 13px; }
   gap: 12px;
 }
 .barrel-type { font-size: 15px; font-weight: 600; color: var(--text); }
+/* Тип топлива подсказывает цвет — как в исходной бочке. */
+.barrel-type.diesel { color: #4fc3f7; }
+.barrel-type.petrol { color: #66bb6a; }
 .barrel-stats {
   display: flex;
   flex-direction: column;
