@@ -73,6 +73,7 @@ render_env.txt
 
 # Google Cloud
 .cloudsql_connection.txt
+.db_connection.txt
 gcloud-key.json
 *.service-account.json
 

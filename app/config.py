@@ -49,13 +49,15 @@ class Config:
     SQLALCHEMY_DATABASE_URI = _build_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Пул соединений: Cloud SQL рвёт простаивающие соединения, поэтому
+    # Пул соединений: облачные БД рвут простаивающие соединения, поэтому
     # pool_pre_ping проверяет соединение перед использованием.
+    # Размер пула настраивается переменными окружения: у бесплатных
+    # хостингов (Neon, Aiven) свой лимит на одновременные соединения.
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 280,
-        "pool_size": 5,
-        "max_overflow": 10,
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "10")),
     }
 
     # Telegram

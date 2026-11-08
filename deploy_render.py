@@ -58,17 +58,25 @@ def read_key() -> str:
 
 
 def read_connection() -> str:
-    """Строка подключения к Cloud SQL из .cloudsql_connection.txt."""
-    conn_file = ROOT / ".cloudsql_connection.txt"
-    if not conn_file.exists():
-        fail(
-            "Нет файла .cloudsql_connection.txt.\n"
-            "  Сначала запусти: powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1"
-        )
-    for line in conn_file.read_text(encoding="utf-8").splitlines():
-        if line.startswith("DATABASE_URL="):
-            return line.split("=", 1)[1].strip()
-    fail("В .cloudsql_connection.txt нет строки DATABASE_URL")
+    """Строка подключения к БД из файла.
+
+    Файл общий для всех провайдеров (Google Cloud SQL, Neon и т.п.) -
+    его кладёт скрипт настройки БД. Старое имя .cloudsql_connection.txt
+    тоже поддерживается, чтобы ничего не ломалось.
+    """
+    for name in (".db_connection.txt", ".cloudsql_connection.txt"):
+        conn_file = ROOT / name
+        if not conn_file.exists():
+            continue
+        for line in conn_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("DATABASE_URL="):
+                url = line.split("=", 1)[1].strip()
+                if url:
+                    return url
+    fail(
+        "Нет файла .db_connection.txt с подключением к БД.\n"
+        "  Сначала создай базу: powershell -ExecutionPolicy Bypass -File setup_db.ps1"
+    )
 
 
 def read_render_env() -> dict:
@@ -210,7 +218,7 @@ def print_manual_steps(extra: dict):
     print("3. Когда попросит значения переменных, вставь:")
     print("")
     print("   DATABASE_URL - скопируй строку DATABASE_URL=... из файла")
-    print("                 .cloudsql_connection.txt (лежит в папке проекта)")
+    print("                 .db_connection.txt (лежит в папке проекта)")
     if extra:
         print("   TELEGRAM_TOKEN и прочее - скопируй из файла render_env.txt")
     print("")

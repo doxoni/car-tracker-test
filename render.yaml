@@ -2,9 +2,9 @@
 # render.yaml — конфигурация деплоя на Render.com
 # Подключение Mini App: BotFather -> Bot Settings -> Menu Button -> Web App URL
 #
-# База данных: Google Cloud SQL PostgreSQL (создаётся скриптом
-# setup_cloud_sql.ps1). Render подключается к ней напрямую - отдельного
-# механизма синхронизации не нужно, база одна и та же.
+# База данных: PostgreSQL в облаке (Google Cloud SQL или Neon - зависит от
+# того, что настроено скриптом setup_db.ps1). Render подключается к ней
+# напрямую - отдельного механизма синхронизации не нужно, база одна и та же.
 
 services:
   - type: web
@@ -16,13 +16,18 @@ services:
     # конфликт опроса Telegram. Потоки внутри воркера - многопоточность.
     startCommand: gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT wsgi:app
     envVars:
-      # Строка подключения к Google Cloud SQL (PostgreSQL).
+      # Строка подключения к PostgreSQL.
       # Ставится автоматически скриптом deploy_render.py.
       - key: DATABASE_URL
         sync: false
-      # Cloud SQL требует SSL для публичного IP
+      # Облачные БД требуют SSL
       - key: PGSSLMODE
         value: require
+      # Пул соединений под лимиты бесплатных хостингов
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "3"
       - key: PYTHON_VERSION
         value: 3.12.0
       - key: TELEGRAM_TOKEN

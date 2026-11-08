@@ -9,7 +9,7 @@
 #   3. Создаёт инстанс cars-tracker-db на бесплатном тарифе db-f1-micro
 #   4. Создаёт базу cars и пользователя car_tracker
 #   5. Открывает доступ извне (Render подключается по публичному IP)
-#   6. Сохраняет строку подключения в .cloudsql_connection.txt
+#   6. Сохраняет строку подключения в .db_connection.txt
 #   7. Если есть Render API-ключ - сразу ставит DATABASE_URL и запускает деплой
 #
 # Запуск с Telegram ID админа (создаст админа уровня 3):
@@ -179,7 +179,7 @@ if (-not $m.Success) { throw "Could not read instance IP from: $ipRaw" }
 $ip = $m.Groups[1].Value
 
 $url = "postgresql://${DB_USER}:${DB_PASS}@${ip}:5432/${DB_NAME}?sslmode=require"
-$outFile = Join-Path $PSScriptRoot ".cloudsql_connection.txt"
+$outFile = Join-Path $PSScriptRoot ".db_connection.txt"
 @(
     "# Google Cloud SQL connection - car-tracker",
     "# Copy the DATABASE_URL line below into Render Dashboard > Environment",
