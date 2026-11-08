@@ -48,8 +48,14 @@ def health():
     облачных БД (Neon) запрос к базе будит compute и тратит CU-часы,
     которых в бесплатном тарифе мало. Проверка БД живёт отдельно -
     на /api/health/db.
+
+    Статус бота отдаём здесь же: логи Render через API не читаются,
+    поэтому состояние бота - единственный способ понять, поднялся он
+    или упал с ошибкой.
     """
-    return jsonify({"status": "ok"})
+    from app.bot_runner import bot_state
+
+    return jsonify({"status": "ok", "bot": bot_state()})
 
 
 @bp.get("/health/db")
