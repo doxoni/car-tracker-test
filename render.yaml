@@ -12,7 +12,9 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python app/main.py
+    # Один воркер: бот работает long polling, несколько воркеров дали бы
+    # конфликт опроса Telegram. Потоки внутри воркера - многопоточность.
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT wsgi:app
     envVars:
       # Строка подключения к Google Cloud SQL (PostgreSQL).
       # Ставится автоматически скриптом deploy_render.py.

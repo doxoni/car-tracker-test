@@ -74,9 +74,13 @@ def read_connection() -> str:
 
 
 def read_render_env() -> dict:
-    """Дополнительные переменные окружения из render_env.txt (KEY=VALUE)."""
-    env_file = ROOT / "render_env.txt"
+    """Дополнительные переменные окружения для Render.
+
+    Сначала берёмся из render_env.txt (KEY=VALUE), потом - из локального
+    .env проекта. Значения нигде не печатаются.
+    """
     values = {}
+    env_file = ROOT / "render_env.txt"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -84,7 +88,23 @@ def read_render_env() -> dict:
                 continue
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
-    return values
+
+    # Локальный .env - чтобы токен бота не пришлось вписывать дважды.
+    dotenv_file = ROOT / ".env"
+    if dotenv_file.exists():
+        for line in dotenv_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if value and key not in values:
+                values[key] = value
+
+    # На Render нужны только эти переменные - лишнее (SECRET_KEY и т.п.) не передаём.
+    allowed = ("TELEGRAM_TOKEN", "ADMIN_TELEGRAM_ID", "WHITELISTED_TELEGRAM_IDS")
+    return {k: v for k, v in values.items() if k in allowed}
 
 
 def api(method: str, path: str, key: str, payload=None):
@@ -221,6 +241,12 @@ def main():
     }
     values.update(extra)
     set_env(service_id, key, values)
+
+    if "TELEGRAM_TOKEN" not in extra:
+        print("")
+        print("⚠️  TELEGRAM_TOKEN не найден - бот на Render не запустится.")
+        print("   Положи токен в файл render_env.txt (см. render_env.example.txt).")
+
     trigger_deploy(service_id, key)
 
     if not args.no_wait:

@@ -50,8 +50,20 @@ def test_miniapp_page(client):
 
 def test_static_files(client):
     """CSS и JS Mini App доступны."""
-    response = client.get("/static/css/style.css")
-    assert response.status_code == 200
+    for path in ("/static/css/style.css", "/static/js/app.js"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert len(response.data) > 0, path
+
+
+def test_miniapp_page_links_existing_static(client):
+    """Все локальные ссылки со страницы Mini App реально отдаются."""
+    import re
+
+    page = client.get("/app").get_data(as_text=True)
+    for url in re.findall(r'(?:href|src)="(/static/[^"]+)"', page):
+        response = client.get(url)
+        assert response.status_code == 200, url
 
 
 def test_dashboard_requires_auth(client):

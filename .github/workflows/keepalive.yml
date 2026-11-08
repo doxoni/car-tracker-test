@@ -1,0 +1,22 @@
+# Keep-alive: будим сервис на Render, чтобы он не уснул.
+#
+# Бесплатный Render усыпляет веб-сервис, если 15 минут никто не стучался.
+# Бот в Telegram работает long polling - пока сервис спит, бот не отвечает.
+# GitHub Actions работает, даже когда ноутбук выключен.
+#
+# Репозиторий публичный, поэтому минуты Actions не ограничены.
+name: keep-alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверить живость сервиса
+        run: |
+          curl -fsS --max-time 60 https://car-tracker-test.onrender.com/api/health
+          echo "Сервис жив."

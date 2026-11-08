@@ -20,6 +20,7 @@
 
 from flask import Blueprint, request, jsonify, g, send_from_directory
 from datetime import datetime, date
+import os
 from sqlalchemy import func, desc, or_
 
 from app import db
@@ -32,6 +33,10 @@ bp = Blueprint("api", __name__, url_prefix="/api")
 # Blueprint для Mini App: отдаёт статику (страницу Telegram Mini App).
 web_bp = Blueprint("web", __name__)
 
+# Папка со статикой лежит рядом с пакетом app (app/static). Путь задаём
+# явно, чтобы не зависеть от того, из какой папки запущен сервер.
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
 
 @bp.get("/health")
 def health():
@@ -43,13 +48,13 @@ def health():
 @web_bp.get("/app")
 def miniapp():
     """Страница Telegram Mini App."""
-    return send_from_directory("static", "index.html")
+    return send_from_directory(STATIC_DIR, "index.html")
 
 
 @web_bp.get("/static/<path:filename>")
 def static_files(filename):
     """Статика Mini App (CSS/JS)."""
-    return send_from_directory("static", filename)
+    return send_from_directory(STATIC_DIR, filename)
 
 
 # ---------- Helpers ----------
