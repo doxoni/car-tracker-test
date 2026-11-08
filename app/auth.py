@@ -17,6 +17,7 @@ from functools import wraps
 from flask import request, g, jsonify
 
 from app.config import Config
+from app import db
 
 
 def get_secret_key():
@@ -103,11 +104,25 @@ def require_auth(f):
         try:
             from app.models import User
             u = User.query.filter_by(tg_id=tg_id).first() if tg_id else None
-            g.current_user = u
-            g.current_user_level = u.level if u else 1
+
+            # Человека ещё нет в БД, но он в списке WHITELISTED_TELEGRAM_IDS -
+            # заводим его как обычного пользователя (уровень 1).
+            if u is None and tg_id and tg_id in (Config.WHITELISTED_TELEGRAM_IDS or []):
+                u = User(tg_id=tg_id, level=1, is_whitelisted=True)
+                db.session.add(u)
+                db.session.commit()
         except Exception:
+            u = None
+
+        # Пользователя нет в БД - доступа нет (в т.ч. в DEV_MODE).
+        # Без этой проверки маршруты падают с 500 при g.current_user.id.
+        if u is None:
             g.current_user = None
-            g.current_user_level = 1
+            g.current_user_level = 0
+            return jsonify({"error": "unauthorized"}), 401
+
+        g.current_user = u
+        g.current_user_level = u.level
 
         return f(*args, **kwargs)
 

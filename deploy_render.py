@@ -1,0 +1,241 @@
+# -*- coding: utf-8 -*-
+"""Деплой car-tracker на Render через Render API.
+
+Что делает:
+  1. Берёт DATABASE_URL из .cloudsql_connection.txt (создаётся скриптом
+     setup_cloud_sql.ps1).
+  2. Создаёт сервис на Render из репозитория doxoni/car-tracker-test
+     (ветка test) или обновляет существующий.
+  3. Ставит переменные окружения и запускает деплой.
+  4. Создаёт админа в БД (уровень 3), если передан TELEGRAM_ID.
+
+Запуск (PowerShell, из папки проекта):
+    $env:RENDER_API_KEY = "rnd_..."
+    python deploy_render.py --telegram-id 123456789
+
+Ключ Render можно положить в файл render_key.txt (в .gitignore) - тогда
+скрипт возьмёт его сам:
+
+    python deploy_render.py --telegram-id 123456789
+"""
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+API = "https://api.render.com/v1"
+ROOT = Path(__file__).resolve().parent
+
+SERVICE_NAME = "car-tracker-test"
+SERVICE_REPO = "https://github.com/doxoni/car-tracker-test"
+SERVICE_BRANCH = "test"
+SERVICE_PLAN = "free"
+
+
+def fail(message: str):
+    """Остановить работу с понятным сообщением."""
+    print(f"ОШИБКА: {message}")
+    sys.exit(1)
+
+
+def read_key() -> str:
+    """Ключ Render API: из переменной окружения или из render_key.txt."""
+    key = (os.getenv("RENDER_API_KEY") or "").strip()
+    if key:
+        return key
+    key_file = ROOT / "render_key.txt"
+    if key_file.exists():
+        key = key_file.read_text(encoding="utf-8").strip()
+    if not key:
+        fail(
+            "Не найден Render API ключ.\n"
+            "  Создай его: https://dashboard.render.com/account/api-keys\n"
+            "  И вставь в файл render_key.txt или в переменную RENDER_API_KEY."
+        )
+    return key
+
+
+def read_connection() -> str:
+    """Строка подключения к Cloud SQL из .cloudsql_connection.txt."""
+    conn_file = ROOT / ".cloudsql_connection.txt"
+    if not conn_file.exists():
+        fail(
+            "Нет файла .cloudsql_connection.txt.\n"
+            "  Сначала запусти: powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1"
+        )
+    for line in conn_file.read_text(encoding="utf-8").splitlines():
+        if line.startswith("DATABASE_URL="):
+            return line.split("=", 1)[1].strip()
+    fail("В .cloudsql_connection.txt нет строки DATABASE_URL")
+
+
+def read_render_env() -> dict:
+    """Дополнительные переменные окружения из render_env.txt (KEY=VALUE)."""
+    env_file = ROOT / "render_env.txt"
+    values = {}
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip()
+    return values
+
+
+def api(method: str, path: str, key: str, payload=None):
+    """Запрос к Render API с обработкой ошибок."""
+    url = f"{API}{path}"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    response = requests.request(method, url, headers=headers, json=payload, timeout=60)
+    if response.status_code >= 400:
+        fail(f"Render API {method} {path} -> {response.status_code}: {response.text[:600]}")
+    if not response.content:
+        return {}
+    return response.json()
+
+
+def find_owner(key: str) -> str:
+    """ID владельца аккаунта Render."""
+    owners = api("GET", "/owners", key)
+    if not owners:
+        fail("Не найден владелец аккаунта Render")
+    return owners[0]["id"]
+
+
+def find_service(owner_id: str, key: str):
+    """Сервис по имени или None."""
+    services = api("GET", f"/services?ownerId={owner_id}", key)
+    for service in services:
+        if service["name"] == SERVICE_NAME:
+            return service
+    return None
+
+
+def create_service(owner_id: str, key: str, env_vars: list) -> dict:
+    """Создать веб-сервис на Render."""
+    payload = {
+        "service": {
+            "name": SERVICE_NAME,
+            "ownerId": owner_id,
+            "repo": SERVICE_REPO,
+            "branch": SERVICE_BRANCH,
+            "type": "web",
+            "runtime": "python",
+            "plan": SERVICE_PLAN,
+            "autoDeployTrigger": "commit",
+            "healthCheckPath": "/api/health",
+            "envVars": env_vars,
+        }
+    }
+    return api("POST", "/services", key, payload)["service"]
+
+
+def set_env(service_id: str, key: str, values: dict):
+    """Обновить переменные окружения сервиса."""
+    for env_key, env_value in values.items():
+        api("PUT", f"/services/{service_id}/env-vars/{env_key}", key, {"value": env_value})
+        print(f"  env: {env_key} = OK")
+
+
+def trigger_deploy(service_id: str, key: str):
+    """Запустить деплой."""
+    api("POST", f"/services/{service_id}/deploys", key, {"clearCache": "do_not_clear"})
+    print("  deploy: запущен")
+
+
+def wait_for_deploy(service_id: str, key: str, timeout: int = 900):
+    """Дождаться успешного деплоя."""
+    deadline = time.time() + timeout
+    last_status = ""
+    while time.time() < deadline:
+        deploys = api("GET", f"/services/{service_id}/deploys?limit=1", key)
+        if deploys:
+            deploy = deploys[0]["deploy"]
+            status = deploy.get("status")
+            if status != last_status:
+                print(f"  status: {status}")
+                last_status = status
+            if status == "live":
+                print("  сервис запущен")
+                return True
+            if status == "build_failed" or status == "update_failed":
+                fail(f"Деплой провалился ({status}). Логи: {deploy.get('deployLogUrl') or 'в дашборде Render'}")
+        time.sleep(15)
+    print("  деплой ещё выполняется, проверь дашборд Render")
+    return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Деплой car-tracker на Render")
+    parser.add_argument("--telegram-id", type=int, default=0, help="Telegram ID админа (уровень 3)")
+    parser.add_argument("--name", default="Koval", help="Имя админа")
+    parser.add_argument("--no-wait", action="store_true", help="Не ждать завершения деплоя")
+    args = parser.parse_args()
+
+    key = read_key()
+    database_url = read_connection()
+    extra = read_render_env()
+
+    print("=== Render deploy ===")
+    owner_id = find_owner(key)
+    service = find_service(owner_id, key)
+
+    if service:
+        print(f"Сервис {SERVICE_NAME} найден: {service['id']}")
+        service_id = service["id"]
+    else:
+        print(f"Сервис {SERVICE_NAME} не найден - создаю")
+        env_vars = [
+            {"key": "DATABASE_URL", "value": database_url},
+            {"key": "PGSSLMODE", "value": "require"},
+            {"key": "PYTHON_VERSION", "value": "3.12.0"},
+        ]
+        for env_key, env_value in extra.items():
+            env_vars.append({"key": env_key, "value": env_value})
+        service = create_service(owner_id, key, env_vars)
+        service_id = service["id"]
+        print(f"Создан: {service_id}")
+
+    values = {
+        "DATABASE_URL": database_url,
+        "PGSSLMODE": "require",
+        "PYTHON_VERSION": "3.12.0",
+    }
+    values.update(extra)
+    set_env(service_id, key, values)
+    trigger_deploy(service_id, key)
+
+    if not args.no_wait:
+        wait_for_deploy(service_id, key)
+
+    service = api("GET", f"/services/{service_id}", key)["service"]
+    print("")
+    print(f"URL: https://{service['serviceDetails']['host']}")
+    print(f"Health: https://{service['serviceDetails']['host']}/api/health")
+
+    if args.telegram_id:
+        os.environ["DATABASE_URL"] = database_url
+        print("")
+        print("=== Создаю админа ===")
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "create_admin.py"), str(args.telegram_id), args.name, "3"],
+            cwd=str(ROOT),
+            env=os.environ,
+        )
+        if result.returncode != 0:
+            print("Не удалось создать админа (см. вывод выше)")
+
+
+if __name__ == "__main__":
+    main()

@@ -68,6 +68,7 @@ telegram-webapp-session
 
 # Render
 render_key.txt
+render_env.txt
 
 # Google Cloud
 .cloudsql_connection.txt

@@ -55,8 +55,9 @@ def create_app():
     app.before_request(_parse_init_data)
 
     # Регистрация blueprints (маршрутов)
-    from .routes import bp as routes_bp
+    from .routes import bp as routes_bp, web_bp
     app.register_blueprint(routes_bp)
+    app.register_blueprint(web_bp)
 
     _init_db(app)
 

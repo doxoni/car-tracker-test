@@ -1,17 +1,21 @@
 # -*- coding: utf-8 -*-
 # render.yaml — конфигурация деплоя на Render.com
 # Подключение Mini App: BotFather -> Bot Settings -> Menu Button -> Web App URL
+#
+# База данных: Google Cloud SQL PostgreSQL (создаётся скриптом
+# setup_cloud_sql.ps1). Render подключается к ней напрямую - отдельного
+# механизма синхронизации не нужно, база одна и та же.
 
 services:
   - type: web
-    name: car-tracker
+    name: car-tracker-test
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python app/main.py
     envVars:
       # Строка подключения к Google Cloud SQL (PostgreSQL).
-      # Задаётся в Render Dashboard: postgresql://USER:PASSWORD@PUBLIC_IP:5432/cars?sslmode=require
+      # Ставится автоматически скриптом deploy_render.py.
       - key: DATABASE_URL
         sync: false
       # Cloud SQL требует SSL для публичного IP
@@ -25,9 +29,12 @@ services:
         sync: false
       - key: WHITELISTED_TELEGRAM_IDS
         sync: false
+      # Бот поднимается в потоке внутри веб-сервиса
+      - key: BOT_ENABLED
+        value: "1"
       - key: APP_URL
         fromService:
           type: web
-          name: car-tracker
+          name: car-tracker-test
           property: host
     healthCheckPath: /api/health

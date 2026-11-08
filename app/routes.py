@@ -18,7 +18,7 @@
 - /api/logs/history — очистка аудит-лога (DELETE, уровень 3)
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, send_from_directory
 from datetime import datetime, date
 from sqlalchemy import func, desc, or_
 
@@ -29,11 +29,27 @@ from app.auth import require_auth, require_level, require_can_view_logs, require
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
+# Blueprint для Mini App: отдаёт статику (страницу Telegram Mini App).
+web_bp = Blueprint("web", __name__)
+
 
 @bp.get("/health")
 def health():
     """Простой health check для Render (не требует авторизации)."""
     return jsonify({"status": "ok"})
+
+
+@web_bp.get("/")
+@web_bp.get("/app")
+def miniapp():
+    """Страница Telegram Mini App."""
+    return send_from_directory("static", "index.html")
+
+
+@web_bp.get("/static/<path:filename>")
+def static_files(filename):
+    """Статика Mini App (CSS/JS)."""
+    return send_from_directory("static", filename)
 
 
 # ---------- Helpers ----------
