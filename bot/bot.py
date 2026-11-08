@@ -29,6 +29,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from app import create_app
 from app.config import Config
+from app.db_retry import run_with_retry
 from app.models import User, Vehicle, Expense, FuelBarrel
 
 load_dotenv()
@@ -52,9 +53,19 @@ def miniapp_url() -> str:
     return url
 
 
+_app = None
+
+
 def app_context():
-    """Создаёт Flask-приложение для доступа к БД из бота."""
-    return create_app()
+    """Flask-приложение для доступа к БД из бота.
+
+    Создаётся один раз и переиспользуется: каждый create_app() поднимает
+    свой пул соединений, а у облачной БД лимит на соединения ограничен.
+    """
+    global _app
+    if _app is None:
+        _app = create_app()
+    return _app
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,7 +88,9 @@ async def barrels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /barrels — остатки в бочках."""
     application = app_context()
     with application.app_context():
-        barrels = FuelBarrel.query.filter_by(is_active=True).all()
+        barrels = run_with_retry(
+            lambda: FuelBarrel.query.filter_by(is_active=True).all()
+        )
 
     if not barrels:
         await update.message.reply_text("Бочки не настроены.")
@@ -100,7 +113,11 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     application = app_context()
     with application.app_context():
         today = datetime.utcnow().date()
-        expenses = Expense.query.filter(Expense.date == today).order_by(Expense.date.desc()).all()
+        expenses = run_with_retry(
+            lambda: Expense.query.filter(Expense.date == today)
+            .order_by(Expense.date.desc())
+            .all()
+        )
 
     if not expenses:
         await update.message.reply_text("Сегодня расходов нет.")

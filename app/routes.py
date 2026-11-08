@@ -24,6 +24,7 @@ import os
 from sqlalchemy import func, desc, or_
 
 from app import db
+from app.db_retry import run_with_retry
 from app.models import User, Vehicle, Expense, FuelBarrel, FuelInflow, FuelOutflow, AuditLog, log_audit
 from app.auth import require_auth, require_level, require_can_view_logs, require_can_clear_logs
 
@@ -58,7 +59,7 @@ def health_db():
     В отличие от /api/health, эта проверка реально ходит в базу.
     """
     try:
-        db.session.execute(db.text("SELECT 1"))
+        run_with_retry(lambda: db.session.execute(db.text("SELECT 1")))
         db.session.rollback()
     except Exception as exc:
         return jsonify({"status": "error", "database": "unavailable", "detail": str(exc)[:200]}), 503
