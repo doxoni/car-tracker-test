@@ -40,10 +40,22 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 @bp.get("/health")
 def health():
-    """Health check для Render: проверяет не только процесс, но и БД.
+    """Health check для Render: проверяет, что процесс жив.
 
-    Заодно держит соединение с Cloud SQL живым - иначе инстанс на
-    бесплатном тарифе может осесть после недели без запросов.
+    Базу здесь намеренно не трогаем: этот эндпоинт дёргает сам Render
+    (healthCheckPath) и keep-alive раз в 10 минут. На бесплатных
+    облачных БД (Neon) запрос к базе будит compute и тратит CU-часы,
+    которых в бесплатном тарифе мало. Проверка БД живёт отдельно -
+    на /api/health/db.
+    """
+    return jsonify({"status": "ok"})
+
+
+@bp.get("/health/db")
+def health_db():
+    """Проверка связи с БД - для ручной диагностики.
+
+    В отличие от /api/health, эта проверка реально ходит в базу.
     """
     try:
         db.session.execute(db.text("SELECT 1"))

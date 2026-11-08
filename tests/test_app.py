@@ -34,8 +34,16 @@ def client():
 
 
 def test_health(client):
-    """Health check отвечает без авторизации и проверяет БД."""
+    """Health check отвечает без авторизации (лёгкий, без запроса в БД)."""
     response = client.get("/api/health")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "ok"
+
+
+def test_health_db(client):
+    """Отдельная проверка БД реально ходит в базу."""
+    response = client.get("/api/health/db")
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "ok"
