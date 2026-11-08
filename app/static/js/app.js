@@ -10,7 +10,17 @@
   // ------------------------------------------------------------
   // Telegram Web App init
   // ------------------------------------------------------------
-  const tg = window.Telegram.WebApp;
+  // Если страницу открыли в обычном браузере (без Telegram), объекта
+  // WebApp может не быть - тогда приложение должно показать понятное
+  // сообщение, а не падать с ошибкой.
+  const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
+    initData: '',
+    expand() {},
+    setHeaderColor() {},
+    showAlert(msg) { alert(msg); },
+    MainButton: { setText() {}, onClick() {}, show() {}, hide() {}, data: {} },
+    BackButton: { onClick() {} }
+  };
   tg.expand();
   tg.setHeaderColor('#1c1c1e');
 
@@ -44,48 +54,69 @@
   }
 
   // ------------------------------------------------------------
-  // Auth: receive initData from Telegram via query string or postMessage
+  // Auth: initData от Telegram
   // ------------------------------------------------------------
+  // Telegram передаёт подпись в объекте WebApp (tg.initData). В query-строке
+  // initData бывает только при открытии ссылки с параметром - на всякий
+  // случай берём и оттуда.
   function getInitData() {
-    // Приложение запускается через Mini App — initData приходит в query string
+    if (tg.initData) return tg.initData;
     const params = new URLSearchParams(window.location.search);
     const initData = params.get('initData');
-    if (initData) return decodeURIComponent(initData);
-    // Иначе можно слушать postMessage от бота — но для MVP используем query
-    return null;
+    return initData ? decodeURIComponent(initData) : '';
   }
 
-  // Отправка initData бэкенду (демо-режим, пока сервер не поднят)
+  const INIT_DATA = getInitData();
   let currentUser = null;
 
-  function initAuth() {
-    const initData = getInitData();
-    if (!initData) {
-      // Без initData работаем в демо-режиме с фиктивным юзером
-      currentUser = { tg_id: 0, role: 'admin', username: 'demo' };
-      setUserBadge('Демо-режим');
-      return;
+  // Любой запрос к API идёт с заголовком X-Telegram-Init-Data: по нему
+  // сервер проверяет подпись Telegram и пускает в приложение.
+  function apiFetch(url, options = {}) {
+    const opts = Object.assign({}, options);
+    const headers = Object.assign({}, opts.headers || {});
+    if (INIT_DATA) headers['X-Telegram-Init-Data'] = INIT_DATA;
+    opts.headers = headers;
+    return fetch(url, opts);
+  }
+
+  async function initAuth() {
+    if (!INIT_DATA) {
+      // Открыли не из Telegram - подписи нет, доступа к данным не будет.
+      setUserBadge('Нужен Telegram');
+      showAuthMessage('Откройте приложение через Telegram-бота: вне Telegram данные недоступны.');
+      return false;
     }
-    // Отправляем на бэкенд для верификации HMAC
-    fetch(`/api/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData })
-    })
-    .then(r => r.json())
-    .then(data => {
+    try {
+      const response = await apiFetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: INIT_DATA })
+      });
+      const data = await response.json();
       if (data.ok) {
         currentUser = data.user;
         setUserBadge(`${currentUser.username} (${currentUser.role})`);
-      } else {
-        tg.showAlert('Авторизация не прошла. Попробуйте снова.');
+        return true;
       }
-    })
-    .catch(() => {
-      // Fallback: демо-режим, если бекенд недоступен
-      currentUser = { tg_id: 0, role: 'admin', username: 'demo' };
-      setUserBadge('Дemo-режим (fallback)');
-    });
+      setUserBadge('Нет доступа');
+      showAuthMessage('Доступ к приложению не разрешён. Напишите боту - он выдаст доступ.');
+      return false;
+    } catch (err) {
+      setUserBadge('Ошибка входа');
+      showAuthMessage('Не удалось связаться с сервером. Проверьте соединение и обновите приложение.');
+      return false;
+    }
+  }
+
+  function showAuthMessage(text) {
+    const main = document.getElementById('app-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🔒</div>
+        <div>${text}</div>
+      </div>
+    `;
   }
 
   function setUserBadge(text) {
@@ -268,7 +299,7 @@
   let vehicles = [];
 
   async function loadVehicles() {
-    const r = await fetch('/api/vehicles');
+    const r = await apiFetch('/api/vehicles');
     vehicles = await r.json();
     renderVehiclesList();
   }
@@ -320,10 +351,10 @@
       if (!plate) return;
       const brand = prompt('Марка фуры:');
       if (!brand) return;
-      fetch('/api/vehicles', {
+      apiFetch('/api/vehicles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plate: plate.toUpperCase(), brand, driver_id: currentUser.tg_id || 1, wialon_id: null, current_mileage: 0, avg_fuel_consumption: 30 })
+        body: JSON.stringify({ plate: plate.toUpperCase(), brand, driver_id: currentUser.id, wialon_id: null, current_mileage: 0, avg_fuel_consumption: 30 })
       })
       .then(r => r.json())
       .then(() => showFlash('Фура добавлена') || loadVehicles())
@@ -337,7 +368,7 @@
   let expenses = [];
 
   async function loadExpenses() {
-    const r = await fetch('/api/expenses?period=month');
+    const r = await apiFetch('/api/expenses');
     expenses = await r.json();
     renderExpensesList();
   }
@@ -408,13 +439,20 @@
     return map[cat] || "gray";
   }
 
-  function applyExpenseFilters() {
+  async function applyExpenseFilters() {
     const veh = document.getElementById('filter-vehicle').value;
     const cat = document.getElementById('filter-category').value.toLowerCase();
     const from = document.getElementById('filter-datefrom').value;
     const to = document.getElementById('filter-dateto').value;
-    // reload from server with params
-    window.location = `/api/expenses?vehicle_id=${veh}&category=${cat}&date_from=${from}&date_to=${to}`;
+    // Собираем запрос с фильтрами и перерисовываем список на месте.
+    const params = new URLSearchParams();
+    if (veh) params.set('vehicle_id', veh);
+    if (cat) params.set('category', cat);
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    const r = await apiFetch(`/api/expenses?${params.toString()}`);
+    expenses = await r.json();
+    renderExpensesList();
   }
 
   function clearExpenseFilters() {
@@ -438,7 +476,7 @@
           <input type="hidden" name="expense_id" value="${expense?.id || ''}">
           <div class="field">
             <label class="field-label" for="vehicle_select">Фура</label>
-            <select id="vehicle_select" class="field-select" disabled>
+            <select id="vehicle_select" class="field-select" name="vehicle_id" required>
               <option value="">— выберите фуру —</option>
               ${vehicles.map(v => `<option value="${v.id}" ${(expense?.vehicle_id === v.id) ? 'selected' : ''}>${v.display_name}</option>`).join('')}
             </select>
@@ -485,9 +523,12 @@
       e.preventDefault();
       const form = e.target;
       const data = Object.fromEntries(new FormData(form).entries());
+      // Сервер ждёт число, а не строку из формы.
+      data.amount = Number(data.amount);
+      data.vehicle_id = Number(data.vehicle_id);
       const method = data.expense_id ? 'PUT' : 'POST';
-      const url = `/api/expenses/${data.expense_id || ''}`;
-      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      const url = data.expense_id ? `/api/expenses/${data.expense_id}` : '/api/expenses';
+      apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
       .then(r => r.json())
       .then(() => showFlash('Сохранено') || loadExpenses())
       .catch(() => tg.showAlert('Ошибка сохранения'));
@@ -509,7 +550,7 @@
     `;
     main.appendChild(header);
 
-    fetch('/api/dashboard?period=all')
+    apiFetch('/api/dashboard?period=all')
       .then(r => r.json())
       .then(data => {
         const barrels = data.barrels || [];
@@ -589,7 +630,7 @@
 
   function generateReport() {
     const period = document.getElementById('report-period').value;
-    fetch(`/api/dashboard?period=${period}`)
+    apiFetch(`/api/dashboard?period=${period}`)
       .then(r => r.json())
       .then(data => {
         // Simple PDF-like view
@@ -611,7 +652,9 @@
   // ------------------------------------------------------------
   // Initialization
   // ------------------------------------------------------------
-  initAuth().then(() => {
+  initAuth().then(ok => {
+    // Без авторизации данные недоступны - показывать их незачем.
+    if (!ok) return;
     // Load data for all tabs
     loadVehicles();
     loadExpenses();
@@ -619,7 +662,7 @@
     // Set up tab switching after data loads
     setTimeout(() => {
       // Dashboard first
-      fetch('/api/dashboard?period=month')
+      apiFetch('/api/dashboard?period=month')
         .then(r => r.json())
         .then(data => renderDashboard(data));
     }, 500);

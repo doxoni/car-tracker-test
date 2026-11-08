@@ -95,3 +95,89 @@ def test_dev_user_sees_dashboard(client):
     assert response.status_code == 200
     data = response.get_json()
     assert "total_amount" in data
+
+
+def test_auth_verify_rejects_bad_signature(client):
+    """Подпись Telegram не проходит - доступ не даём."""
+    response = client.post("/api/auth/verify", json={"initData": "user=%7B%22id%22%3A1%7D&hash=abc"})
+    assert response.status_code == 401
+
+
+def test_auth_verify_creates_user_for_everyone(client, monkeypatch):
+    """Любой, кто открыл приложение, получает профиль без белого списка."""
+    import hashlib
+    import hmac
+    import json
+    import time
+    from urllib.parse import urlencode
+
+    from app import db
+    from app.config import Config
+    from app.models import User
+
+    token = "123456:TESTTOKEN"
+    monkeypatch.setattr(Config, "TELEGRAM_TOKEN", token)
+
+    # Считаем настоящую подпись Telegram тем же способом, что и сервер.
+    fields = {
+        "user": json.dumps({"id": 777001, "first_name": "Тест"}, separators=(",", ":")),
+        "auth_date": str(int(time.time())),
+    }
+    data_check = "\n".join("%s=%s" % (k, fields[k]) for k in sorted(fields))
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    fields["hash"] = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+
+    response = client.post("/api/auth/verify", json={"initData": urlencode(fields)})
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    data = response.get_json()
+    assert data["ok"] is True
+    assert data["user"]["level"] == 1
+
+    with client.application.app_context():
+        user_row = User.query.filter_by(tg_id=777001).first()
+        assert user_row is not None
+        assert user_row.level == 1
+
+
+def test_open_access_allows_vehicle_creation(client):
+    """При открытом доступе обычный пользователь может создать фуру."""
+    from app import db
+    from app.models import User
+
+    with client.application.app_context():
+        db.session.add(User(tg_id=1, level=1, is_whitelisted=True))
+        db.session.commit()
+
+    response = client.post(
+        "/api/vehicles",
+        json={"plate": "АА111АА", "brand": "MAN", "driver_id": 1},
+    )
+    assert response.status_code == 201, response.get_data(as_text=True)
+
+
+def test_open_access_allows_expense_creation(client):
+    """При открытом доступе расход создаётся сразу утверждённым."""
+    from app import db
+    from app.models import User
+
+    with client.application.app_context():
+        db.session.add(User(tg_id=1, level=1, is_whitelisted=True))
+        db.session.commit()
+        vehicle = client.post(
+            "/api/vehicles",
+            json={"plate": "ВВ222ВВ", "brand": "Volvo", "driver_id": 1},
+        )
+        vehicle_id = vehicle.get_json()["id"]
+
+    response = client.post(
+        "/api/expenses",
+        json={
+            "vehicle_id": vehicle_id,
+            "category": "топливо",
+            "amount": 1500,
+            "date": "2026-11-08",
+        },
+    )
+    assert response.status_code == 201, response.get_data(as_text=True)
+    assert response.get_json()["status"] == "approved"

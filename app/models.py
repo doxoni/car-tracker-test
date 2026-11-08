@@ -51,12 +51,24 @@ class User(db.Model):
         return self.level in (2, 3)
 
     def can_view_vehicle(self, vehicle):
-        """Уровень 1 видит только активные фуры, уровни 2/3 — все."""
+        """Уровень 1 видит только активные фуры, уровни 2/3 — все.
+
+        При открытом доступе (Config.OPEN_ACCESS) видны все фуры.
+        """
+        from app.config import Config
+
+        if Config.OPEN_ACCESS:
+            return True
         if self.level in (2, 3):
             return True
         return vehicle.status == "active"
 
     def can_add_expense(self, vehicle=None):
+        """Можно ли добавить расход по этой фуре."""
+        from app.config import Config
+
+        if Config.OPEN_ACCESS:
+            return True
         if self.level in (2, 3):
             return True
         if self.level == 1 and vehicle and vehicle.status == "active":

@@ -41,6 +41,25 @@ def _parse_user(init_data):
         return None
 
 
+def parse_init_data(raw: str) -> dict:
+    """Разобрать сырую строку initData от Telegram в словарь полей.
+
+    Telegram присылает initData строкой запроса: "user={...}&auth_date=...&hash=..."
+    Значения при этом percent-encoded, поэтому сначала декодируем их.
+    """
+    from urllib.parse import parse_qs
+
+    if not raw:
+        return {}
+    parsed = parse_qs(raw)
+    return {key: values[0] for key, values in parsed.items() if values}
+
+
+def user_from_init_data(init_data: dict) -> dict:
+    """Данные пользователя Telegram из initData (пустой dict, если их нет)."""
+    return _parse_user(init_data) or {}
+
+
 def verify_telegram_init_data(init_data: dict) -> bool:
     """Проверить подпись Telegram Mini App initData.
 
@@ -105,9 +124,11 @@ def require_auth(f):
             from app.models import User
             u = User.query.filter_by(tg_id=tg_id).first() if tg_id else None
 
-            # Человека ещё нет в БД, но он в списке WHITELISTED_TELEGRAM_IDS -
-            # заводим его как обычного пользователя (уровень 1).
-            if u is None and tg_id and tg_id in (Config.WHITELISTED_TELEGRAM_IDS or []):
+            # Человека ещё нет в БД - заводим его как обычного пользователя
+            # (уровень 1). Бот и Mini App работают для всех, кто их открыл,
+            # без белого списка. В DEV_MODE не заводим: там нет настоящего
+            # Telegram-человека, тесты ждут отказа при неизвестном id.
+            if u is None and tg_id and not Config.DEV_MODE:
                 u = User(tg_id=tg_id, level=1, is_whitelisted=True)
                 db.session.add(u)
                 db.session.commit()
@@ -130,15 +151,20 @@ def require_auth(f):
 
 
 def require_level(min_level: int):
-    """Требует уровень пользователя >= min_level (1=user, 2=operator, 3=super_admin)."""
+    """Требует уровень пользователя >= min_level (1=user, 2=operator, 3=super_admin).
+
+    При открытом доступе (Config.OPEN_ACCESS) проверка уровня не действует:
+    доступно всё, что открыто авторизованному пользователю.
+    """
 
     def decorator(f):
         @wraps(f)
         @require_auth
         def decorated(*args, **kwargs):
-            level = getattr(g, "current_user_level", 1)
-            if level < min_level:
-                return jsonify({"error": "forbidden"}), 403
+            if not Config.OPEN_ACCESS:
+                level = getattr(g, "current_user_level", 1)
+                if level < min_level:
+                    return jsonify({"error": "forbidden"}), 403
             return f(*args, **kwargs)
 
         return decorated

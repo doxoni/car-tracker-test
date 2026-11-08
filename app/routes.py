@@ -24,6 +24,7 @@ import os
 from sqlalchemy import func, desc, or_
 
 from app import db
+from app.config import Config
 from app.db_retry import run_with_retry
 from app.models import User, Vehicle, Expense, FuelBarrel, FuelInflow, FuelOutflow, AuditLog, log_audit
 from app.auth import require_auth, require_level, require_can_view_logs, require_can_clear_logs
@@ -193,13 +194,71 @@ def _jsonify_log(l: AuditLog):
     }
 
 
+# ---------- Авторизация Mini App ----------
+
+# Человеческие названия уровней доступа - для бейджа в Mini App.
+LEVEL_NAMES = {1: "водитель", 2: "оператор", 3: "суперадмин"}
+
+
+@bp.post("/auth/verify")
+def auth_verify():
+    """Проверить initData от Telegram и вернуть профиль пользователя.
+
+    Mini App присылает initData при открытии. Здесь она проверяется по
+    подписи Telegram, а пользователь ищется в БД (или заводится, если он
+    в списке разрешённых). Дальше Mini App шлёт тот же initData в
+    заголовке X-Telegram-Init-Data при каждом запросе к API.
+    """
+    from app.auth import parse_init_data, user_from_init_data, verify_telegram_init_data
+
+    data = request.get_json(silent=True) or {}
+    raw = data.get("initData") or ""
+    init_data = parse_init_data(raw)
+
+    if not verify_telegram_init_data(init_data):
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    telegram_user = user_from_init_data(init_data)
+    tg_id = telegram_user.get("id")
+    if not tg_id:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    user = User.query.filter_by(tg_id=tg_id).first()
+    if user is None:
+        # Бот и Mini App работают для всех: нового человека заводим
+        # сразу, обычным пользователем (уровень 1).
+        user = User(
+            tg_id=tg_id,
+            username=telegram_user.get("username"),
+            level=1,
+            is_whitelisted=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    return jsonify(
+        {
+            "ok": True,
+            "user": {
+                "id": user.id,
+                "tg_id": user.tg_id,
+                "username": user.username or telegram_user.get("first_name") or "user",
+                "level": user.level,
+                "role": LEVEL_NAMES.get(user.level, "водитель"),
+                "is_admin": user.level in (2, 3),
+            },
+        }
+    )
+
+
 # ---------- Vehicles ----------
 
 @bp.get("/vehicles")
 @require_auth
 def list_vehicles():
-    """Список фур. Уровень 1 — все активные (поиск), уровни 2/3 — все."""
-    if g.current_user_level in (2, 3):
+    """Список фур. При открытом доступе видны все, иначе: уровень 1 — только
+    активные, уровни 2/3 — все."""
+    if Config.OPEN_ACCESS or g.current_user_level in (2, 3):
         vehicles = Vehicle.query.order_by(Vehicle.plate).all()
     else:
         vehicles = Vehicle.query.filter_by(status="active").order_by(Vehicle.plate).all()
@@ -326,8 +385,9 @@ def list_expenses():
 
     query = Expense.query.join(Vehicle)
 
-    # Права доступа
-    if g.current_user_level == 1:
+    # Права доступа: при открытом доступе видны все расходы,
+    # иначе уровень 1 видит только свои.
+    if not Config.OPEN_ACCESS and g.current_user_level == 1:
         query = query.filter(Expense.submitted_by == g.current_user.id)
     # уровни 2/3 видят всё
 
@@ -369,8 +429,9 @@ def create_expense():
     if data["category"] not in Expense.CATEGORIES:
         return jsonify({"error": "invalid category"}), 400
 
-    # Уровень 1 — pending, уровни 2/3 — approved сразу
-    if g.current_user_level == 1:
+    # При открытом доступе расход создаётся сразу утверждённым,
+    # иначе: уровень 1 — pending, уровни 2/3 — approved сразу.
+    if not Config.OPEN_ACCESS and g.current_user_level == 1:
         status = "pending"
     else:
         status = "approved"
@@ -414,7 +475,7 @@ def update_expense(expense_id):
     """Обновить расход. Уровень 1 — только свои pending, уровни 2/3 — любые."""
     expense = Expense.query.get_or_404(expense_id)
 
-    if g.current_user_level == 1:
+    if not Config.OPEN_ACCESS and g.current_user_level == 1:
         if expense.submitted_by != g.current_user.id or expense.status != "pending":
             return jsonify({"error": "forbidden"}), 403
     # уровни 2/3 могут редактировать любые
@@ -452,7 +513,7 @@ def delete_expense(expense_id):
     """Удалить расход. Уровень 1 — только свои pending, уровни 2/3 — любые."""
     expense = Expense.query.get_or_404(expense_id)
 
-    if g.current_user_level == 1:
+    if not Config.OPEN_ACCESS and g.current_user_level == 1:
         if expense.submitted_by != g.current_user.id or expense.status != "pending":
             return jsonify({"error": "forbidden"}), 403
     # уровни 2/3 могут удалять любые
@@ -549,7 +610,7 @@ def dashboard():
     # Базовые запросы с учётом прав и только approved расходы
     def _base_query():
         query = Expense.query.join(Vehicle).filter(Expense.status == "approved")
-        if g.current_user_level == 1:
+        if not Config.OPEN_ACCESS and g.current_user_level == 1:
             query = query.filter(Expense.submitted_by == g.current_user.id)
         # уровни 2/3 видят все approved
         return query
@@ -587,9 +648,9 @@ def dashboard():
         for c in by_category
     ]
 
-    # Бочки (уровни 2/3)
+    # Бочки (при открытом доступе видны всем)
     barrels_data = []
-    if g.current_user_level in (2, 3):
+    if Config.OPEN_ACCESS or g.current_user_level in (2, 3):
         barrels = FuelBarrel.query.filter_by(is_active=True).all()
         barrels_data = [
             {

@@ -76,6 +76,17 @@ class Config:
         if x.strip().isdigit()
     ]
 
+    # Открытый доступ: приложением и ботом пользуется весь, кто их открыл.
+    # Уровень в базе остаётся (1 - водитель, 2 - оператор, 3 - суперадмин),
+    # но ограничения по уровню не применяются. Выключается переменной
+    # OPEN_ACCESS=0, если уровни понадобятся снова.
+    OPEN_ACCESS = os.getenv("OPEN_ACCESS", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
     # Период синхронизации с Wialon (минуты)
     WIALON_SYNC_INTERVAL = int(os.getenv("WIALON_SYNC_INTERVAL", "15"))
 
