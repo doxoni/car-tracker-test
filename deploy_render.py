@@ -205,10 +205,19 @@ def main():
         service_id = service["id"]
         print(f"Создан: {service_id}")
 
+    # APP_URL нужен боту: без него кнопка Mini App ведёт в никуда.
+    # Если значение задано в render_env.txt - не перетираем.
+    if "APP_URL" not in extra:
+        details = api("GET", f"/services/{service_id}", key)["service"]
+        host = (details.get("serviceDetails") or {}).get("host") or f"{SERVICE_NAME}.onrender.com"
+        extra = dict(extra)
+        extra["APP_URL"] = f"https://{host}"
+
     values = {
         "DATABASE_URL": database_url,
         "PGSSLMODE": "require",
         "PYTHON_VERSION": "3.12.0",
+        "BOT_ENABLED": "1",
     }
     values.update(extra)
     set_env(service_id, key, values)

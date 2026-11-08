@@ -12,7 +12,14 @@
 #   6. Сохраняет строку подключения в .cloudsql_connection.txt
 #   7. Если есть Render API-ключ - сразу ставит DATABASE_URL и запускает деплой
 #
+# Запуск с Telegram ID админа (создаст админа уровня 3):
+#   powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1 -TelegramId 123456789
+#
 # NOTE: ASCII-only on purpose so PowerShell 5.1 reads it on any code page.
+
+param(
+    [string]$TelegramId = ""
+)
 
 $ErrorActionPreference = "Continue"
 
@@ -192,7 +199,11 @@ if (Test-Path $renderKeyFile) {
     Write-Host ""
     Step "Deploying to Render"
     $env:RENDER_API_KEY = ((Get-Content $renderKeyFile -Raw).Trim())
-    python (Join-Path $PSScriptRoot "deploy_render.py")
+    if ($TelegramId -match "^\d+$") {
+        python (Join-Path $PSScriptRoot "deploy_render.py") --telegram-id $TelegramId
+    } else {
+        python (Join-Path $PSScriptRoot "deploy_render.py")
+    }
     Remove-Item Env:\RENDER_API_KEY
 } else {
     Write-Host ""

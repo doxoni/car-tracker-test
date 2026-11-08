@@ -1,0 +1,12 @@
+# Пример файла render_env.txt - переменные окружения для Render.
+# Скопируй этот файл в render_env.txt (он в .gitignore, в Git не попадёт)
+# и подставь свои значения. Формат: КЛЮЧ=ЗНАЧЕНИЕ, по одной на строку.
+#
+# TELEGRAM_TOKEN - токен от @BotFather
+# ADMIN_TELEGRAM_ID - твой Telegram ID (он же станет суперадмином в БД)
+# WHITELISTED_TELEGRAM_IDS - список Telegram ID через запятую, кому открыт доступ
+# APP_URL - заполнять не нужно, deploy_render.py подставит сам
+
+TELEGRAM_TOKEN=123456789:AAExampleTokenReplaceMe
+ADMIN_TELEGRAM_ID=123456789
+WHITELISTED_TELEGRAM_IDS=123456789
