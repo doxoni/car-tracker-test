@@ -133,9 +133,19 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
-def build_app():
-    """Создаёт Telegram-приложение (Application)."""
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+def build_app(on_ready=None, on_stop=None):
+    """Создаёт Telegram-приложение (Application).
+
+    on_ready - вызывается, когда бот подключился к Telegram (getMe прошёл);
+    on_stop  - вызывается, когда опрос остановлен.
+    Оба нужны, чтобы /api/health показывал реальное состояние бота.
+    """
+    builder = ApplicationBuilder().token(TELEGRAM_TOKEN)
+    if on_ready is not None:
+        builder = builder.post_init(on_ready)
+    if on_stop is not None:
+        builder = builder.post_stop(on_stop)
+    application = builder.build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("barrels", barrels_cmd))
     application.add_handler(CommandHandler("today", today_cmd))
