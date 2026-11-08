@@ -20,7 +20,7 @@
 import os
 import sys
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -28,7 +28,8 @@ API = "https://console.neon.tech/api/v2"
 ROOT = Path(__file__).resolve().parent
 
 PROJECT_NAME = "cars"
-REGION_ID = "aws-us-east-2"
+# Регион ближе к нам - меньше задержка на запросы.
+REGION_ID = "aws-eu-central-1"
 PG_VERSION = 17
 KEY_FILE = ROOT / "neon_key.txt"
 OUT_FILE = ROOT / ".db_connection.txt"
@@ -80,6 +81,36 @@ def existing_project(key: str, org_id: str):
         if project.get("name") == PROJECT_NAME:
             return project
     return None
+
+
+def extract_params(conn: dict) -> dict:
+    """Достать параметры подключения из ответа Neon.
+
+    API отдаёт их по-разному: либо списком connection_uris с полем
+    connection_parameters, либо одной строкой uri. Разбираем оба случая.
+    """
+    uris = conn.get("connection_uris") or []
+    if uris:
+        params = uris[0].get("connection_parameters") or {}
+        if params.get("host"):
+            return params
+
+    uri = conn.get("uri") or ""
+    if not uri:
+        for item in uris:
+            uri = item.get("uri") or item.get("connection_uri") or ""
+            if uri:
+                break
+    if not uri:
+        fail("Neon не вернул строку подключения для проекта")
+
+    parsed = urlparse(uri)
+    params = {
+        "host": (parsed.hostname or "").replace("-pooler.", "."),
+        "database": (parsed.path or "").lstrip("/") or "neondb",
+        "role": parsed.username or "neondb_owner",
+    }
+    return params
 
 
 def build_url(data: dict, key: str) -> str:
@@ -179,12 +210,13 @@ def main():
 
     # Параметры подключения берём у проекта - так надёжнее, чем
     # разбирать строку connection_uri вручную.
-    conn = api("GET", f"/projects/{project_id}/connection_uri", key)
-    uris = conn.get("connection_uris") or []
-    if not uris:
-        fail("Neon не вернул строку подключения для проекта")
-    params = uris[0].get("connection_parameters") or {}
-    role_name = params.get("role") or "neondb_owner"
+    conn = api(
+        "GET",
+        f"/projects/{project_id}/connection_uri?database_name=neondb&role_name=neondb_owner",
+        key,
+    )
+    params = extract_params(conn)
+    role_name = params.get("role") or params.get("user") or "neondb_owner"
 
     # Пароль роли не отдают в открытом виде - запрашиваем отдельно.
     role_data = api(

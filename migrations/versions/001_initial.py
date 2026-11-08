@@ -16,14 +16,19 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Уникальные ограничения называем явно: иначе следующая миграция
+    # (batch_alter_table) на SQLite не сможет пересоздать таблицу -
+    # ей нужны имена ограничений, а безымянные она не переносит.
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("tg_id", sa.BigInteger(), unique=True, nullable=False),
-        sa.Column("username", sa.String(120), unique=True, nullable=True),
+        sa.Column("tg_id", sa.BigInteger(), nullable=False),
+        sa.Column("username", sa.String(120), nullable=True),
         sa.Column("role", sa.String(20), nullable=False, server_default="driver"),
         sa.Column("is_whitelisted", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.UniqueConstraint("tg_id", name="uq_users_tg_id"),
+        sa.UniqueConstraint("username", name="uq_users_username"),
     )
 
     op.create_table(
@@ -31,19 +36,21 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("plate", sa.String(20), nullable=False),
         sa.Column("brand", sa.String(80), nullable=False),
-        sa.Column("vin", sa.String(50), unique=True, nullable=True),
-        sa.Column("driver_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("vin", sa.String(50), nullable=True),
+        sa.Column("driver_id", sa.Integer(), sa.ForeignKey("users.id", name="fk_vehicles_driver_id"), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="active"),
-        sa.Column("wialon_id", sa.BigInteger(), unique=True, nullable=True),
+        sa.Column("wialon_id", sa.BigInteger(), nullable=True),
         sa.Column("current_mileage", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("avg_fuel_consumption", sa.Float(), nullable=False, server_default="30.0"),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.UniqueConstraint("vin", name="uq_vehicles_vin"),
+        sa.UniqueConstraint("wialon_id", name="uq_vehicles_wialon_id"),
     )
 
     op.create_table(
         "expenses",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("vehicle_id", sa.Integer(), sa.ForeignKey("vehicles.id"), nullable=False),
+        sa.Column("vehicle_id", sa.Integer(), sa.ForeignKey("vehicles.id", name="fk_expenses_vehicle_id"), nullable=False),
         sa.Column("category", sa.String(30), nullable=False),
         sa.Column("amount", sa.Float(), nullable=False),
         sa.Column("date", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
@@ -67,7 +74,7 @@ def upgrade() -> None:
     op.create_table(
         "fuel_inflow",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("barrel_id", sa.Integer(), sa.ForeignKey("fuel_barrels.id"), nullable=False),
+        sa.Column("barrel_id", sa.Integer(), sa.ForeignKey("fuel_barrels.id", name="fk_fuel_inflow_barrel_id"), nullable=False),
         sa.Column("date", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("liters", sa.Float(), nullable=False),
         sa.Column("price_per_liter", sa.Float(), nullable=False),
@@ -78,9 +85,9 @@ def upgrade() -> None:
     op.create_table(
         "fuel_outflow",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("barrel_id", sa.Integer(), sa.ForeignKey("fuel_barrels.id"), nullable=True),
-        sa.Column("vehicle_id", sa.Integer(), sa.ForeignKey("vehicles.id"), nullable=True),
-        sa.Column("driver_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("barrel_id", sa.Integer(), sa.ForeignKey("fuel_barrels.id", name="fk_fuel_outflow_barrel_id"), nullable=True),
+        sa.Column("vehicle_id", sa.Integer(), sa.ForeignKey("vehicles.id", name="fk_fuel_outflow_vehicle_id"), nullable=True),
+        sa.Column("driver_id", sa.Integer(), sa.ForeignKey("users.id", name="fk_fuel_outflow_driver_id"), nullable=True),
         sa.Column("date", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("liters", sa.Float(), nullable=False),
         sa.Column("cost_per_liter", sa.Float(), nullable=False),

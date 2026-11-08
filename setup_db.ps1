@@ -202,69 +202,77 @@ if ($hasBilling) {
         $neonCode = $LASTEXITCODE
         if (Test-Path Env:\NEON_API_KEY) { Remove-Item Env:\NEON_API_KEY }
         if ($neonCode -ne 0) { exit $neonCode }
+    } else {
+        Step "Настройка базы в Neon"
         Write-Host ""
-        Write-Host "DONE. Connection saved to: $outFile" -ForegroundColor Green
-        exit 0
-    }
-
-    Step "Настройка базы в Neon"
-    Write-Host ""
-    Write-Host "Google Cloud требует карту для биллинга, а она не нужна для Neon:" -ForegroundColor Cyan
-    Write-Host "Neon - бесплатный PostgreSQL, карта не требуется, база не засыпает насовсем." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Сделай один раз в браузере (2 минуты):" -ForegroundColor Cyan
-    Write-Host "  1. Открой: $NEON_URL"
-    Write-Host "  2. Войди через Google или GitHub (карта не спрашивается)."
-    Write-Host "  3. Создай проект: имя cars, регион - United States (или любой)."
-    Write-Host "  4. На странице проекта найди Connection string и скопируй его."
-    Write-Host ""
-    Write-Host "ВАЖНО: бери обычный (direct) адрес, без -pooler в имени хоста." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Если хочешь, чтобы дальше всё делалось само, создай API-ключ:" -ForegroundColor Cyan
-    Write-Host "  https://console.neon.tech/app/settings/api-keys -> Create API key"
-    Write-Host "  и сохрани его (одна строка, начиная с napi_) в файл neon_key.txt"
-    Write-Host "  рядом с этим скриптом. Тогда проект создастся сам."
-    Write-Host ""
-    try { Start-Process $NEON_URL } catch { }
-    Write-Host "Страница открыта в браузере. Скопируй строку подключения и вставь её ниже." -ForegroundColor Green
-    Write-Host "(строка начинается с postgresql:// - вставь целиком, Enter)" -ForegroundColor Green
-    Write-Host ""
-
-    $url = ""
-    for ($i = 1; $i -le 3; $i++) {
-        $entered = Read-Host "Строка подключения"
-        if ($entered) { $url = $entered.Trim(); break }
-        Write-Host "Пусто. Попробуй ещё раз." -ForegroundColor Yellow
-    }
-    if (-not $url) {
+        Write-Host "Google Cloud требует карту для биллинга, а она не нужна для Neon:" -ForegroundColor Cyan
+        Write-Host "Neon - бесплатный PostgreSQL, карта не требуется, база не засыпает насовсем." -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "Строка подключения не введена - база не настроена." -ForegroundColor Red
-        exit 2
-    }
-    if (-not ($url -match "^postgres(ql)?://")) {
+        Write-Host "Сделай один раз в браузере (2 минуты):" -ForegroundColor Cyan
+        Write-Host "  1. Открой: $NEON_URL"
+        Write-Host "  2. Войди через Google или GitHub (карта не спрашивается)."
+        Write-Host "  3. Создай проект: имя cars, регион - Europe (Frankfurt)."
+        Write-Host "  4. На странице проекта найди Connection string и скопируй его."
         Write-Host ""
-        Write-Host "Это не строка подключения Postgres (нужно начало postgresql://)." -ForegroundColor Red
-        exit 2
+        Write-Host "ВАЖНО: бери обычный (direct) адрес, без -pooler в имени хоста." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Если хочешь, чтобы дальше всё делалось само, создай API-ключ:" -ForegroundColor Cyan
+        Write-Host "  https://console.neon.tech/app/settings/api-keys -> Create API key"
+        Write-Host "  и сохрани его (одна строка, начиная с napi_) в файл neon_key.txt"
+        Write-Host "  рядом с этим скриптом. Тогда проект создастся сам."
+        Write-Host ""
+        try { Start-Process $NEON_URL } catch { }
+        Write-Host "Страница открыта в браузере. Скопируй строку подключения и вставь её ниже." -ForegroundColor Green
+        Write-Host "(строка начинается с postgresql:// - вставь целиком, Enter)" -ForegroundColor Green
+        Write-Host ""
+
+        $url = ""
+        for ($i = 1; $i -le 3; $i++) {
+            $entered = Read-Host "Строка подключения"
+            if ($entered) { $url = $entered.Trim(); break }
+            Write-Host "Пусто. Попробуй ещё раз." -ForegroundColor Yellow
+        }
+        if (-not $url) {
+            Write-Host ""
+            Write-Host "Строка подключения не введена - база не настроена." -ForegroundColor Red
+            exit 2
+        }
+        if (-not ($url -match "^postgres(ql)?://")) {
+            Write-Host ""
+            Write-Host "Это не строка подключения Postgres (нужно начало postgresql://)." -ForegroundColor Red
+            exit 2
+        }
+
+        # Пулер (PgBouncer) не нужен: у нас мало соединений, а через него
+        # ломаются prepared statements. Оставляем только прямой адрес.
+        $url = $url -replace "-pooler\.", "."
+
+        # channel_binding - необязательный и капризный параметр, убираем.
+        $url = $url -replace "[?&]channel_binding=[^&]*", ""
+        $url = $url -replace "\?&", "?"
+
+        # Некоторые строки из консоли Neon не содержат параметр sslmode -
+        # без него соединение может уйти без шифрования.
+        if ($url -notmatch "sslmode=") {
+            $url = $url + $(if ($url -match "\?") { "&" } else { "?" }) + "sslmode=require"
+        }
+
+        @(
+            "# Neon connection - car-tracker",
+            "DATABASE_URL=$url"
+        ) | Set-Content -Path $outFile -Encoding UTF8
     }
+}
 
-    # Пулер (PgBouncer) не нужен: у нас мало соединений, а через него
-    # ломаются prepared statements. Оставляем только прямой адрес.
-    $url = $url -replace "-pooler\.", "."
-
-    # channel_binding - необязательный и капризный параметр, убираем.
-    $url = $url -replace "[?&]channel_binding=[^&]*", ""
-    $url = $url -replace "\?&", "?"
-
-    # Некоторые строки из консоли Neon не содержат параметр sslmode -
-    # без него соединение может уйти без шифрования.
-    if ($url -notmatch "sslmode=") {
-        $url = $url + $(if ($url -match "\?") { "&" } else { "?" }) + "sslmode=require"
-    }
-
-    @(
-        "# Neon connection - car-tracker",
-        "DATABASE_URL=$url"
-    ) | Set-Content -Path $outFile -Encoding UTF8
+# ---------- 4. Миграции ----------
+# Схему создаёт alembic, а не db.create_all(): только так появляется
+# таблица alembic_version, и следующие миграции не падают.
+Step "Applying migrations"
+python (Join-Path $PSScriptRoot "apply_migrations.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Migrations failed - see the output above." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host ""

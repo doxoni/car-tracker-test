@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -27,6 +28,31 @@ logger = logging.getLogger("alembic.env")
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 target_metadata = None
+
+
+def _database_url() -> str:
+    """Откуда взять строку подключения к БД.
+
+    Приоритет: переменная окружения DATABASE_URL (её ставит деплой
+    на Render и скрипт setup_db.ps1), иначе - настройки приложения,
+    иначе - SQLite из alembic.ini.
+    """
+    url = (os.getenv("DATABASE_URL") or "").strip()
+    if url:
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        return url
+
+    try:
+        from app.config import Config
+
+        return Config.SQLALCHEMY_DATABASE_URI
+    except Exception:  # pragma: no cover - только если сломались импорты
+        return config.get_main_option("sqlalchemy.url")
+
+
+# alembic.ini нужен только для секций логирования, адрес БД берём сами.
+config.set_main_option("sqlalchemy.url", _database_url().replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

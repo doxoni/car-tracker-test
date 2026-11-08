@@ -17,6 +17,9 @@ depends_on = None
 
 def upgrade() -> None:
     # --- users: добавить level, заполнить, удалить role ---
+    # batch_alter_table на PostgreSQL делает обычный ALTER, а на SQLite
+    # пересоздаёт таблицу. Пересоздание возможно только если у всех
+    # ограничений есть имена - поэтому в миграции 001 они названы.
     with op.batch_alter_table("users") as batch_op:
         batch_op.add_column(sa.Column("level", sa.Integer(), nullable=False, server_default="1"))
 
@@ -30,15 +33,34 @@ def upgrade() -> None:
     # --- expenses: добавить поля одобрения ---
     with op.batch_alter_table("expenses") as batch_op:
         batch_op.add_column(sa.Column("status", sa.String(20), nullable=False, server_default="pending"))
-        batch_op.add_column(sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
-        batch_op.add_column(sa.Column("approved_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
+        batch_op.add_column(
+            sa.Column(
+                "submitted_by",
+                sa.Integer(),
+                sa.ForeignKey("users.id", name="fk_expenses_submitted_by"),
+                nullable=True,
+            )
+        )
+        batch_op.add_column(
+            sa.Column(
+                "approved_by",
+                sa.Integer(),
+                sa.ForeignKey("users.id", name="fk_expenses_approved_by"),
+                nullable=True,
+            )
+        )
         batch_op.add_column(sa.Column("approved_at", sa.DateTime(), nullable=True))
 
     # --- audit_logs: создать таблицу ---
     op.create_table(
         "audit_logs",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "user_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id", name="fk_audit_logs_user_id"),
+            nullable=True,
+        ),
         sa.Column("action", sa.String(50), nullable=False),
         sa.Column("entity_type", sa.String(50), nullable=False),
         sa.Column("entity_id", sa.Integer(), nullable=True),

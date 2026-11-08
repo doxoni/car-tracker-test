@@ -26,7 +26,7 @@ def _parse_init_data():
 
 
 def _init_db(app, attempts: int = 10, delay: float = 5.0):
-    """Создать таблицы, дожидаясь готовности БД.
+    """Привести схему БД в порядок, дожидаясь готовности базы.
 
     Cloud SQL может быть ещё не готов к первому подключению после деплоя,
     поэтому повторяем попытки с задержкой.
@@ -37,7 +37,9 @@ def _init_db(app, attempts: int = 10, delay: float = 5.0):
     for attempt in range(1, attempts + 1):
         try:
             with app.app_context():
-                db.create_all()
+                from app.db_schema import ensure_schema
+
+                ensure_schema(app)
             return
         except OperationalError as e:
             print(f"⚠️ БД недоступна (попытка {attempt}/{attempts}): {e}")
