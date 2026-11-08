@@ -32,11 +32,13 @@ function Info($msg) { Write-Host $msg }
 
 # Run gcloud with given arguments, print its output, fail on non-zero exit code.
 # NOTE: parameter is named GcloudArgs (NOT $Args - that name is reserved by PowerShell).
+# WARNING-строки gcloud отбрасываются: иначе они попадают в разбор ответа.
 function Invoke-Gcloud {
     param([string[]]$GcloudArgs, [switch]$AllowFail)
     $out = & $script:GcloudExe @GcloudArgs 2>&1
     $code = $LASTEXITCODE
-    $text = ($out | ForEach-Object { "$_" }) -join "`n"
+    $lines = @($out | ForEach-Object { "$_" } | Where-Object { $_ -notlike "WARNING:*" -and $_ -notlike "The following filter keys*" })
+    $text = ($lines -join "`n").Trim()
     if ($text) { Write-Host $text }
     if ($code -ne 0 -and -not $AllowFail) {
         throw "gcloud failed (exit $code): $($GcloudArgs -join ' ')"
@@ -72,7 +74,10 @@ Write-Host "gcloud: $GcloudExe"
 # консоль Google (нужен браузер), но привязать проект к уже созданному счёту
 # gcloud умеет сам.
 Step "Checking billing account"
-$accounts = (Invoke-Gcloud -GcloudArgs @("billing","accounts","list","--format=value(name)","--filter=open=true") -AllowFail).Trim()
+$accounts = (Invoke-Gcloud -GcloudArgs @("billing","accounts","list","--format=value(name)") -AllowFail).Trim()
+# gcloud печатает "Listed 0 items." вместо пустого вывода - это не счёт
+$accountLine = @($accounts -split "`n" | Where-Object { $_ -match "^billingAccounts/" } | Select-Object -First 1)
+$accounts = if ($accountLine) { $accountLine[0].Trim() } else { "" }
 if (-not $accounts) {
     Write-Host ""
     Write-Host "BILLING ACCOUNT NOT FOUND - Cloud SQL cannot be created yet." -ForegroundColor Red
