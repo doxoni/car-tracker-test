@@ -87,3 +87,8 @@ htmlcov/
 
 # Local files
 TEST_БОТ_ТОКЕН.txt
+
+# Neon (локальный контекст проекта и ключи)
+.neon
+.env.local
+.claude/settings.local.json

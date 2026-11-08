@@ -1,8 +1,12 @@
 flask==3.1.0
 flask-sqlalchemy==3.1.1
+# SQLAlchemy закрепляем: в 2.1 драйвером по умолчанию для postgresql://
+# стал psycopg (v3), а не psycopg2. Без фиксации версии на сервере может
+# оказаться несовместимая пара.
+sqlalchemy==2.1.6
 alembic==1.13.3
 python-telegram-bot==21.8
-psycopg2-binary==2.9.13
+psycopg[binary]==3.3.8
 requests==2.32.3
 python-dotenv==1.0.1
 gunicorn==23.0.0
