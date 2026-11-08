@@ -542,6 +542,23 @@ small { color: var(--hint); font-size: 13px; }
 .mt-sm { margin-top: var(--spacing-sm, 8px); }
 .mb-2 { margin-bottom: 8px; }
 
+/* ---------- Фильтры расходов ---------- */
+/* Поля занимают всю ширину, кнопки - по содержимому. */
+.filter-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 8px);
+  margin-top: var(--spacing-sm, 8px);
+}
+.filter-actions {
+  display: flex;
+  gap: var(--spacing-sm, 8px);
+}
+.filter-actions .btn {
+  width: auto;
+  flex: 1 1 0;
+}
+
 /* ---------- Полосы прокрутки ---------- */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

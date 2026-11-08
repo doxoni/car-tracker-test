@@ -36,6 +36,10 @@ services:
         sync: false
       - key: WHITELISTED_TELEGRAM_IDS
         sync: false
+      # Открытый доступ: приложением и ботом пользуется весь, кто его открыл.
+      # Уровень в базе остаётся, но ограничения по уровню не применяются.
+      - key: OPEN_ACCESS
+        value: "1"
       # Бот поднимается в потоке внутри веб-сервиса
       - key: BOT_ENABLED
         value: "1"

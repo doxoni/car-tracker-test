@@ -599,7 +599,7 @@
     header.className = 'card';
     header.innerHTML = `
       <div class="card-title">Расходы</div>
-      <div style="margin-top: var(--spacing-sm); display: flex; gap: var(--spacing-sm); flex-wrap: wrap;">
+      <div class="filter-row">
         <select id="filter-vehicle" class="field-select">
           <option value="">Все фуры</option>
           ${vehicles.map(v => `<option value="${v.id}">${v.display_name || v.plate}</option>`).join('')}
@@ -607,8 +607,10 @@
         <input id="filter-category" class="field-input" placeholder="Категория...">
         <input id="filter-datefrom" class="field-input" type="date" placeholder="Дата от">
         <input id="filter-dateto" class="field-input" type="date" placeholder="Дата до">
-        <button class="btn btn-secondary" onclick="applyExpenseFilters()">Применить</button>
-        <button class="btn btn-primary" onclick="clearExpenseFilters()">Сбросить</button>
+        <div class="filter-actions">
+          <button class="btn btn-secondary" onclick="applyExpenseFilters()">Применить</button>
+          <button class="btn btn-secondary" onclick="clearExpenseFilters()">Сбросить</button>
+        </div>
       </div>
     `;
     main.appendChild(header);
