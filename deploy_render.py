@@ -132,7 +132,12 @@ def read_render_env() -> dict:
                 values[key] = value
 
     # На Render нужны только эти переменные - лишнее (SECRET_KEY и т.п.) не передаём.
-    allowed = ("TELEGRAM_TOKEN", "ADMIN_TELEGRAM_ID", "WHITELISTED_TELEGRAM_IDS")
+    allowed = (
+        "TELEGRAM_TOKEN",
+        "ADMIN_TELEGRAM_ID",
+        "WHITELISTED_TELEGRAM_IDS",
+        "OPEN_ACCESS",
+    )
     return {k: v for k, v in values.items() if k in allowed}
 
 

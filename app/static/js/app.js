@@ -2,6 +2,9 @@
 /* Car Tracker — Telegram Mini App SPA
    Features: auth via initData, fleet list, expenses, dashboard + charts,
               fuel barrels (read), analytics, Telegram theme support.
+
+   Экраны: дашборд, фуры, расходы, бочки, отчёты. Каждая вкладка - свой
+   блок внутри #app-main, переключение идёт функцией showTab().
 */
 
 (() => {
@@ -22,21 +25,110 @@
     BackButton: { onClick() {} }
   };
   tg.expand();
-  tg.setHeaderColor('#1c1c1e');
 
   const root = document.documentElement;
-  // Telegram theme CSS variables
-  root.style.setProperty('--tg-theme-bg-color', getComputedStyle(document.body).backgroundColor || '#ffffff');
-  root.style.setProperty('--tg-theme-text-color', getComputedStyle(document.body).color || '#1c1c1e');
+
+  // ------------------------------------------------------------
+  // Тема Telegram
+  // ------------------------------------------------------------
+  // Разбирает цвет Telegram: «#rrggbb», «rgb(r, g, b)» или «rgba(r, g, b, a)».
+  function parseColor(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    let match = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (match) {
+      let hex = match[1];
+      if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+      }
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16)
+      ];
+    }
+    match = text.match(/^rgba?\(([^)]+)\)$/i);
+    if (match) {
+      const parts = match[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+      if (parts.length >= 3 && parts.slice(0, 3).every(n => !isNaN(n))) {
+        return [parts[0], parts[1], parts[2]];
+      }
+    }
+    return null;
+  }
+
+  // Тот же цвет с прозрачностью.
+  function withAlpha(value, alpha) {
+    const rgb = parseColor(value);
+    if (!rgb) return null;
+    return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+  }
+
+  // Берёт первый непустой ключ из themeParams.
+  function pick(params, names) {
+    for (let i = 0; i < names.length; i++) {
+      if (params && params[names[i]]) return params[names[i]];
+    }
+    return '';
+  }
+
+  // Применяем цвета темы Telegram к CSS-переменным.
+  function applyTheme() {
+    const params = tg.themeParams || {};
+    const dark = tg.colorScheme === 'dark';
+
+    root.classList.toggle('tg-dark', dark);
+    root.classList.toggle('tg-light', !dark);
+
+    const bg = pick(params, ['bg', 'bg_color', 'theme_bg_color']);
+    const text = pick(params, ['text', 'text_color', 'theme_text_color']);
+    const hint = pick(params, ['hint', 'hint_color']);
+    const secondaryBg = pick(params, ['secondary_bg_color']);
+    const button = pick(params, ['button_color', 'link', 'link_color']);
+
+    function set(name, value) {
+      if (value) root.style.setProperty(name, value);
+    }
+
+    set('--bg', bg);
+    set('--bg2', pick(params, ['header_bg_color']) || secondaryBg);
+    set('--text', text);
+    set('--hint', hint);
+    set('--btn', button);
+    set('--btn_text', pick(params, ['button_text_color']));
+    set('--card', pick(params, ['section_bg_color']) || secondaryBg);
+    set('--field', secondaryBg || bg);
+    set('--danger', pick(params, ['destructive_text_color']));
+
+    // Производные переменные - оттенки от цветов темы.
+    set('--text2', pick(params, ['subtitle_text_color', 'secondary_hint_color']) || hint);
+    set('--chip_text', hint);
+    set('--btn2', pick(params, ['secondary_button_color']) || secondaryBg);
+    set('--btn2_text', pick(params, ['secondary_button_text_color']) || text);
+    set('--line', withAlpha(text, dark ? 0.14 : 0.12));
+    set('--chip', withAlpha(text, dark ? 0.08 : 0.06));
+    set('--btn_faint', withAlpha(button, 0.25));
+    set('--danger_soft', withAlpha(pick(params, ['destructive_text_color']), 0.14));
+    set('--shadow', `0 1px 2px ${withAlpha(text, dark ? 0.3 : 0.1)}`);
+
+    // Цвет системной панели - чтобы приложение сливалось с окном Telegram.
+    try {
+      if (tg.setBackgroundColor && bg) tg.setBackgroundColor(bg);
+      if (tg.setHeaderColor && bg) tg.setHeaderColor(bg);
+    } catch (error) { /* старые версии клиента - не критично */ }
+  }
+
+  applyTheme();
+  if (tg.onEvent) tg.onEvent('themeChanged', applyTheme);
 
   // Main button
-  const mainBtnWrap = document.getElementById('main-button-wrap');
+  // Обработчик главной кнопки храним отдельно: у объекта MainButton из
+  // Telegram SDK нет ни data, ни dataset - это свойства DOM-элементов.
+  let mainButtonHandler = null;
   const mainButton = tg.MainButton;
   mainButton.setText('Сохранить');
   mainButton.onClick(() => {
-    // context-dependent — filled per-tab
-    const handler = mainBtn.dataset.onclick;
-    if (handler && window[handler]) window[handler]();
+    if (mainButtonHandler && window[mainButtonHandler]) window[mainButtonHandler]();
     else tg.showAlert('Кнопка не настроена для текущего экрана');
   });
 
@@ -51,6 +143,12 @@
     el.textContent = msg;
     el.style.display = 'block';
     setTimeout(() => el.style.display = 'none', 3000);
+  }
+
+  // Цвет из темы (для графиков Chart.js)
+  function themeColor(name, fallback) {
+    const value = getComputedStyle(root).getPropertyValue(name).trim();
+    return value || fallback;
   }
 
   // ------------------------------------------------------------
@@ -81,7 +179,6 @@
 
   async function initAuth() {
     if (!INIT_DATA) {
-      // Открыли не из Telegram - подписи нет, доступа к данным не будет.
       setUserBadge('Нужен Telegram');
       showAuthMessage('Откройте приложение через Telegram-бота: вне Telegram данные недоступны.');
       return false;
@@ -117,6 +214,8 @@
         <div>${text}</div>
       </div>
     `;
+    const nav = document.getElementById('bottom-nav');
+    if (nav) nav.classList.add('hidden');
   }
 
   function setUserBadge(text) {
@@ -125,77 +224,137 @@
   }
 
   // ------------------------------------------------------------
-  // State management — вкладки
+  // Экраны (вкладки)
   // ------------------------------------------------------------
-  const tabs = {
-    dashboard: '#dashboard',
-    vehicles: '#vehicles',
-    expenses: '#expenses',
-    barrels: '#barrels',
-    reports: '#reports'
-  };
+  const TABS = ['dashboard', 'vehicles', 'expenses', 'barrels', 'reports'];
+  let activeTab = 'dashboard';
+
+  // Создаём блок каждой вкладки один раз и переключаем их видимость.
+  function ensureViews() {
+    const main = document.getElementById('app-main');
+    if (!main) return;
+    const skeleton = document.getElementById('skeleton');
+    if (skeleton) skeleton.remove();
+    TABS.forEach(name => {
+      if (document.getElementById('view-' + name)) return;
+      const view = document.createElement('section');
+      view.id = 'view-' + name;
+      view.className = 'app-view hidden';
+      main.appendChild(view);
+    });
+  }
+
+  function getView(name) {
+    let view = document.getElementById('view-' + name);
+    if (!view) {
+      ensureViews();
+      view = document.getElementById('view-' + name);
+    }
+    if (!view) return null;
+    view.innerHTML = '';
+    return view;
+  }
+
+  // Графики Chart.js: при скрытии экрана canvas схлопывается, поэтому
+  // после возврата на вкладку графику нужно сказать "пересчитай размер".
+  const charts = [];
+  function resizeCharts() {
+    charts.forEach(chart => {
+      try { chart.resize(); } catch (e) { /* график мог быть удалён */ }
+    });
+  }
 
   function showTab(name) {
-    // Обновляем нижнюю навигацию
+    if (!TABS.includes(name)) name = 'dashboard';
+    activeTab = name;
+
+    ensureViews();
+    TABS.forEach(tab => {
+      const view = document.getElementById('view-' + tab);
+      if (view) view.classList.toggle('hidden', tab !== name);
+    });
+
+    // Нижняя навигация
     document.querySelectorAll('.nav-item').forEach(item => {
       item.classList.toggle('active', item.dataset.tab === name);
     });
 
-    // Скрываем все контейнеры
-    Object.values(tabs).forEach(id => {
-      const el = document.querySelector(id);
-      if (el) el.classList.add('hidden');
-    });
-
-    // Показываем выбранную вкладку
-    const target = document.querySelector(tabs[name]);
-    if (target) target.classList.remove('hidden');
-
-    // Настраиваем MainButton под вкладку
+    // Главная кнопка Telegram под текущий экран
     const mainBtn = tg.MainButton;
     if (name === 'vehicles') {
-      mainBtn.setText('Сохранить фуру');
-      mainBtn.data.onclick = 'saveVehicle';
+      mainBtn.setText('Добавить фуру');
+      mainButtonHandler = 'saveVehicle';
       mainBtn.show();
     } else if (name === 'expenses') {
       mainBtn.setText('Добавить расход');
-      mainBtn.data.onclick = 'saveExpense';
+      mainButtonHandler = 'saveExpense';
       mainBtn.show();
     } else if (name === 'barrels') {
       mainBtn.setText('Обновить');
-      mainBtn.data.onclick = 'refreshBarrels';
+      mainButtonHandler = 'refreshBarrels';
       mainBtn.show();
     } else if (name === 'reports') {
       mainBtn.setText('Сформировать отчёт');
-      mainBtn.data.onclick = 'generateReport';
+      mainButtonHandler = 'generateReport';
       mainBtn.show();
     } else {
+      mainButtonHandler = null;
       mainBtn.hide();
+    }
+
+    loadTab(name);
+    resizeCharts();
+  }
+
+  // Данные для вкладки грузим при первом открытии и по кнопке обновить.
+  const loaded = {};
+  function loadTab(name, force = false) {
+    if (loaded[name] && !force) return;
+    loaded[name] = true;
+    switch (name) {
+      case 'dashboard': loadDashboard(); break;
+      case 'vehicles': loadVehicles(); break;
+      case 'expenses': loadVehicles().then(loadExpenses); break;
+      case 'barrels': loadBarrels(); break;
+      case 'reports': loadReports(); break;
     }
   }
 
   // Initialize navigation
   document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const tab = item.dataset.tab;
-      showTab(tab);
+    item.addEventListener('click', event => {
+      event.preventDefault();
+      showTab(item.dataset.tab);
     });
   });
-
-  // Show dashboard by default
-  showTab('dashboard');
 
   // ------------------------------------------------------------
   // Dashboard tab
   // ------------------------------------------------------------
+  async function loadDashboard() {
+    try {
+      const r = await apiFetch('/api/dashboard?period=month');
+      const data = await r.json();
+      renderDashboard(data);
+    } catch (err) {
+      const view = getView('dashboard');
+      if (view) view.innerHTML = '<div class="empty-state">Не удалось загрузить дашборд</div>';
+    }
+  }
+
+  // Название периода по-русски (сервер отдаёт week/month/year/all).
+  const PERIOD_NAMES = {
+    week: 'за неделю', month: 'за месяц', year: 'за год', all: 'за всё время'
+  };
+
   function renderDashboard(data) {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
+    const main = getView('dashboard');
+    if (!main) return;
 
     const cardTotal = document.createElement('div');
     cardTotal.className = 'card';
     cardTotal.innerHTML = `
-      <div class="card-title">Итоговые затраты ${data.period}</div>
+      <div class="card-title">Итоговые затраты ${PERIOD_NAMES[data.period] || data.period}</div>
       <div style="font-size: var(--font-size-2xl); font-weight: 700; margin-top: var(--spacing-sm);">
         ₴ ${Number(data.total_amount).toLocaleString()}
       </div>
@@ -208,7 +367,7 @@
       cardVeh.className = 'card';
       cardVeh.innerHTML = `
         <div class="card-title">Топ-5 фур по затратам</div>
-        <canvas id="topVehiclesChart" class="chart-wrap"></canvas>
+        <div class="chart-wrap"><canvas id="topVehiclesChart"></canvas></div>
       `;
       main.appendChild(cardVeh);
       renderTopVehiclesChart(data.top_vehicles);
@@ -220,77 +379,82 @@
       cardCat.className = 'card';
       cardCat.innerHTML = `
         <div class="card-title">Структура по категориям</div>
-        <canvas id="categoryChart" class="chart-wrap"></canvas>
+        <div class="chart-wrap"><canvas id="categoryChart"></canvas></div>
       `;
       main.appendChild(cardCat);
       renderCategoryChart(data.by_category);
     }
 
-    // Barrels (only admin)
+    // Barrels
     if (data.barrels && data.barrels.length > 0) {
       const cardBar = document.createElement('div');
       cardBar.className = 'card';
       cardBar.innerHTML = `
-        <div class="card-title">Топливо в бочках</div>
-        <div style="margin-top: var(--spacing-md);">
-      `;
-      data.barrels.forEach(b => {
-        const lowCls = b.is_low ? 'low' : '';
-        cardBar.innerHTML += `
-          <div class="barrel-card">
-            <div class="barrel-header">
-              <span class="barrel-type ${b.fuel_type}">${b.name} (${b.fuel_type})</span>
-              <span class="barrel-stats">
-                <span class="barrel-stats-value">${Number(b.current).toLocaleString()} л</span>
-                <span>${Number(b.capacity).toLocaleString()} л максимум</span>
-              </span>
-            </div>
-            <div class="barrel-level-wrap">
-              <div class="barrel-level-fill ${lowCls}" style="width: ${b.remaining_pct}%; --level-color: #5ac8fa; --level-color-light: #b2d7ff;">
-                ${b.remaining_pct}%
-              </div>
-            </div>
+        <div class="card-title">Топливные бочки</div>
+        <div style="margin-top: var(--spacing-sm);">
+          ${data.barrels.map(b => `
             <div class="barrel-stats">
-              <span>остаток: ${b.formatted_remaining}</span>
+              <span>${b.name} (${b.fuel_type})</span>
+              <span>${Number(b.current).toLocaleString()} л</span>
             </div>
-          </div>
-        `;
-      });
-      cardBar.innerHTML += `</div>`;
+          `).join('')}
+        </div>
+      `;
       main.appendChild(cardBar);
     }
   }
 
   function renderTopVehiclesChart(data) {
-    const ctx = document.getElementById('topVehiclesChart').getContext('2d');
-    new Chart(ctx, {
+    const canvas = document.getElementById('topVehiclesChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const chart = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: data.map(v => `${v.brand} ${v.plate}`).slice(0, 5),
-        datasets: [{ label: 'Затраты (₽)', data: data.map(v => v.total), backgroundColor: '#007aff' }]
+        datasets: [{
+          label: 'Затраты (₴)',
+          data: data.map(v => v.total),
+          backgroundColor: themeColor('--btn', '#3ba3ec')
+        }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 5000 } }, x: { grid: { display: false } } }
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { color: themeColor('--hint', '#8a8a8a') } },
+          x: { grid: { display: false }, ticks: { color: themeColor('--hint', '#8a8a8a') } }
+        }
       }
     });
+    charts.push(chart);
   }
 
   function renderCategoryChart(data) {
-    const ctx = document.getElementById('categoryChart').getContext('2d');
+    const canvas = document.getElementById('categoryChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     const labels = data.map(d => d.category);
     const totals = data.map(d => d.total);
     const bgColors = {
-      "топливо": "#ff9500", "ремонт": "#007aff", "запчасти": "#bf5af2",
-      "шины": "#8e8e93", "штрафы": "#ff3b30", "дорога": "#5ac8fa", "мойка": "#34c759", "прочее": "#8e8e93"
+      "топливо": "#ff9500", "ремонт": "#3ba3ec", "запчасти": "#bf5af2",
+      "шины": "#8e8e93", "штрафы": "#e53935", "дорога": "#5ac8fa",
+      "дорога/платные участки": "#5ac8fa", "мойка": "#4caf50", "прочее": "#8e8e93"
     };
-    new Chart(ctx, {
+    // Цвет даём по названию категории, а не по позиции - иначе цвета
+    // путаются при изменении порядка.
+    const colors = labels.map(cat => bgColors[cat] || "#8e8e93");
+    const chart = new Chart(ctx, {
       type: 'pie',
-      data: { labels, datasets: [{ data: totals, backgroundColor: Object.values(bgColors) }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+      data: { labels, datasets: [{ data: totals, backgroundColor: colors }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: themeColor('--text2', '#b8b8b8') } } }
+      }
     });
+    charts.push(chart);
   }
 
   // ------------------------------------------------------------
@@ -301,12 +465,13 @@
   async function loadVehicles() {
     const r = await apiFetch('/api/vehicles');
     vehicles = await r.json();
-    renderVehiclesList();
+    if (activeTab === 'vehicles') renderVehiclesList();
+    return vehicles;
   }
 
   function renderVehiclesList(filter = '') {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
+    const main = getView('vehicles');
+    if (!main) return;
 
     const header = document.createElement('div');
     header.innerHTML = `
@@ -329,7 +494,7 @@
         const card = document.createElement('div');
         card.className = 'vehicle-card';
         card.innerHTML = `
-          <div class="vehicle-icon">${v.brand.charAt(0)}</div>
+          <div class="vehicle-icon">${(v.brand || '?').charAt(0)}</div>
           <div class="vehicle-info">
             <div class="vehicle-name">${v.brand} ${v.plate}</div>
             <div class="vehicle-plate">Гос. номер: ${v.plate}</div>
@@ -344,22 +509,75 @@
     }
     main.appendChild(list);
 
-    // Add vehicle handler (admin only in demo)
-    document.getElementById('add-vehicle-btn').addEventListener('click', () => {
-      if (!currentUser || !currentUser.is_admin) return tg.showAlert('Только админ');
-      const plate = prompt('Гос. номер фуры:');
-      if (!plate) return;
-      const brand = prompt('Марка фуры:');
-      if (!brand) return;
-      apiFetch('/api/vehicles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plate: plate.toUpperCase(), brand, driver_id: currentUser.id, wialon_id: null, current_mileage: 0, avg_fuel_consumption: 30 })
-      })
-      .then(r => r.json())
-      .then(() => showFlash('Фура добавлена') || loadVehicles())
-      .catch(() => tg.showAlert('Ошибка при добавлении'));
+    const addBtn = document.getElementById('add-vehicle-btn');
+    if (addBtn) addBtn.addEventListener('click', openVehicleForm);
+  }
+
+  // Форма добавления фуры
+  function openVehicleForm() {
+    const main = getView('vehicles');
+    if (!main) return;
+
+    main.innerHTML = `
+      <div class="card">
+        <div class="card-title">Новая фура</div>
+        <form id="vehicle-form">
+          <div class="field">
+            <label class="field-label" for="vehicle_plate">Гос. номер</label>
+            <input id="vehicle_plate" class="field-input" type="text" name="plate" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="vehicle_brand">Марка</label>
+            <input id="vehicle_brand" class="field-input" type="text" name="brand" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="vehicle_mileage">Пробег, км</label>
+            <input id="vehicle_mileage" class="field-input" type="number" name="current_mileage" min="0" step="1" value="0">
+          </div>
+          <div class="field">
+            <label class="field-label" for="vehicle_consumption">Расход, л/100км</label>
+            <input id="vehicle_consumption" class="field-input" type="number" name="avg_fuel_consumption" min="0" step="0.1" value="30">
+          </div>
+          <div style="margin-top: var(--spacing-md); display: flex; justify-content: flex-end; gap: var(--spacing-sm);">
+            <button type="button" class="btn btn-secondary" onclick="renderVehiclesList()">Отмена</button>
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    const form = document.getElementById('vehicle-form');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.current_mileage = Number(data.current_mileage) || 0;
+      data.avg_fuel_consumption = Number(data.avg_fuel_consumption) || 0;
+      data.driver_id = currentUser ? currentUser.id : null;
+      try {
+        const r = await apiFetch('/api/vehicles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const answer = await r.json();
+        if (!r.ok) {
+          tg.showAlert(answer.error === 'plate exists' ? 'Такая фура уже есть в списке' : 'Не удалось сохранить фуру');
+          return;
+        }
+        showFlash('Фура добавлена');
+        await loadVehicles();
+        renderVehiclesList();
+      } catch (err) {
+        tg.showAlert('Ошибка при добавлении фуры');
+      }
     });
+  }
+
+  // Кнопка Telegram на экране "Фуры"
+  function saveVehicle() {
+    const form = document.getElementById('vehicle-form');
+    if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit'));
+    else openVehicleForm();
   }
 
   // ------------------------------------------------------------
@@ -370,12 +588,12 @@
   async function loadExpenses() {
     const r = await apiFetch('/api/expenses');
     expenses = await r.json();
-    renderExpensesList();
+    if (activeTab === 'expenses') renderExpensesList();
   }
 
   function renderExpensesList() {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
+    const main = getView('expenses');
+    if (!main) return;
 
     const header = document.createElement('div');
     header.className = 'card';
@@ -384,7 +602,7 @@
       <div style="margin-top: var(--spacing-sm); display: flex; gap: var(--spacing-sm); flex-wrap: wrap;">
         <select id="filter-vehicle" class="field-select">
           <option value="">Все фуры</option>
-          ${vehicles.map(v => `<option value="${v.id}">${v.display_name}</option>`).join('')}
+          ${vehicles.map(v => `<option value="${v.id}">${v.display_name || v.plate}</option>`).join('')}
         </select>
         <input id="filter-category" class="field-input" placeholder="Категория...">
         <input id="filter-datefrom" class="field-input" type="date" placeholder="Дата от">
@@ -402,7 +620,7 @@
       list.innerHTML = `<div class="empty-state">
         <div class="empty-icon">💸</div>
         <div>Расходов нет</div>
-        <div>Добавьте первый расход через вкладку "Фуры"</div>
+        <div>Добавьте первый расход кнопкой ниже</div>
       </div>`;
     } else {
       expenses.forEach(e => {
@@ -426,7 +644,6 @@
     }
     main.appendChild(list);
 
-    // Add expense button
     const addBtn = document.createElement('button');
     addBtn.className = 'btn btn-primary w-full mb-2';
     addBtn.textContent = 'Добавить расход';
@@ -464,13 +681,13 @@
   }
 
   function openExpenseForm(expense = null) {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
+    const main = getView('expenses');
+    if (!main) return;
 
     const vehicle = vehicles.find(v => v.id === (expense?.vehicle_id || null));
 
     main.innerHTML = `
-      <div class="card" style="max-width: 560px; margin: 0 auto;">
+      <div class="card">
         <div class="card-title">${expense ? 'Редактировать расход' : 'Добавить расход'}</div>
         <form id="expense-form">
           <input type="hidden" name="expense_id" value="${expense?.id || ''}">
@@ -478,12 +695,12 @@
             <label class="field-label" for="vehicle_select">Фура</label>
             <select id="vehicle_select" class="field-select" name="vehicle_id" required>
               <option value="">— выберите фуру —</option>
-              ${vehicles.map(v => `<option value="${v.id}" ${(expense?.vehicle_id === v.id) ? 'selected' : ''}>${v.display_name}</option>`).join('')}
+              ${vehicles.map(v => `<option value="${v.id}" ${(expense?.vehicle_id === v.id) ? 'selected' : ''}>${v.display_name || v.plate}</option>`).join('')}
             </select>
           </div>
           <div class="field">
             <label class="field-label" for="category">Категория</label>
-            <select id="category" class="field-select">
+            <select id="category" class="field-select" name="category">
               <option value="топливо" ${(expense?.category === 'топливо') ? 'selected' : ''}>топливо</option>
               <option value="ремонт" ${(expense?.category === 'ремонт') ? 'selected' : ''}>ремонт</option>
               <option value="запчасти" ${(expense?.category === 'запчасти') ? 'selected' : ''}>запчасти</option>
@@ -495,7 +712,7 @@
             </select>
           </div>
           <div class="field">
-            <label class="field-label" for="amount">Сумма (₽)</label>
+            <label class="field-label" for="amount">Сумма (₴)</label>
             <input id="amount" class="field-input" type="number" name="amount" min="0" step="100" value="${expense?.amount || ''}" required>
           </div>
           <div class="field">
@@ -519,7 +736,7 @@
       </div>
     `;
 
-    document.getElementById('expense-form').addEventListener('submit', e => {
+    document.getElementById('expense-form').addEventListener('submit', async e => {
       e.preventDefault();
       const form = e.target;
       const data = Object.fromEntries(new FormData(form).entries());
@@ -528,121 +745,142 @@
       data.vehicle_id = Number(data.vehicle_id);
       const method = data.expense_id ? 'PUT' : 'POST';
       const url = data.expense_id ? `/api/expenses/${data.expense_id}` : '/api/expenses';
-      apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-      .then(r => r.json())
-      .then(() => showFlash('Сохранено') || loadExpenses())
-      .catch(() => tg.showAlert('Ошибка сохранения'));
+      try {
+        const r = await apiFetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const answer = await r.json();
+        if (!r.ok) {
+          tg.showAlert(answer.error || 'Не удалось сохранить расход');
+          return;
+        }
+        showFlash('Сохранено');
+        await loadExpenses();
+        renderExpensesList();
+      } catch (err) {
+        tg.showAlert('Ошибка сохранения');
+      }
     });
   }
 
-  // ------------------------------------------------------------
-  // Barrels tab (read-only MVP)
-  // ------------------------------------------------------------
-  function renderBarrels() {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.className = 'card';
-    header.innerHTML = `
-      <div class="card-title">Топливные бочки</div>
-      <button class="btn btn-secondary" onclick="refreshBarrels()">Обновить</button>
-    `;
-    main.appendChild(header);
-
-    apiFetch('/api/dashboard?period=all')
-      .then(r => r.json())
-      .then(data => {
-        const barrels = data.barrels || [];
-        const mainContent = document.createElement('div');
-        mainContent.style.marginTop = 'var(--spacing-md)';
-
-        if (barrels.length === 0) {
-          mainContent.innerHTML = `<div class="empty-state">
-            <div class="empty-icon">⛽</div>
-            <div>Бочки не настроены</div>
-            <div>Админ может добавить ёмкости через бэкенд API</div>
-          </div>`;
-        } else {
-          barrels.forEach(b => {
-            const lowCls = b.is_low ? 'low' : '';
-            mainContent.innerHTML += `
-              <div class="barrel-card">
-                <div class="barrel-header">
-                  <span class="barrel-type ${b.fuel_type}">${b.name} (${b.fuel_type})</span>
-                  <span class="barrel-stats">
-                    <span class="barrel-stats-value">${Number(b.current).toLocaleString()} л</span>
-                    <span>${Number(b.capacity).toLocaleString()} л</span>
-                  </span>
-                </div>
-                <div class="barrel-level-wrap">
-                  <div class="barrel-level-fill ${lowCls}" style="width: ${b.remaining_pct}%; --level-color: #5ac8fa; --level-color-light: #b2d7ff;">
-                    ${b.remaining_pct}%
-                  </div>
-                </div>
-                <div class="barrel-stats">
-                  <span>порог уведомления: ${b.threshold_liters} л</span>
-                  <span>уровень: ${b.formatted_remaining}</span>
-                </div>
-              </div>
-            `;
-          });
-        }
-        main.appendChild(mainContent);
-      })
-      .catch(() => tg.showAlert('Ошибка загрузки бочек'));
+  // Кнопка Telegram на экране "Расходы"
+  function saveExpense() {
+    const form = document.getElementById('expense-form');
+    if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit'));
+    else openExpenseForm();
   }
 
-  function refreshBarrels() { renderBarrels(); }
+  // ------------------------------------------------------------
+  // Barrels tab
+  // ------------------------------------------------------------
+  async function loadBarrels() {
+    const main = getView('barrels');
+    if (!main) return;
+
+    main.innerHTML = '<div class="skeleton-wrap"><div class="skeleton-line w-full"></div><div class="skeleton-line w-80"></div></div>';
+
+    try {
+      const r = await apiFetch('/api/dashboard?period=all');
+      const data = await r.json();
+      const barrels = data.barrels || [];
+
+      main.innerHTML = '';
+      const header = document.createElement('div');
+      header.className = 'card';
+      header.innerHTML = `
+        <div class="card-title">Топливные бочки</div>
+        <button class="btn btn-secondary" onclick="refreshBarrels()">Обновить</button>
+      `;
+      main.appendChild(header);
+
+      const mainContent = document.createElement('div');
+      mainContent.style.marginTop = 'var(--spacing-md)';
+
+      if (barrels.length === 0) {
+        mainContent.innerHTML = `<div class="empty-state">
+          <div class="empty-icon">⛽</div>
+          <div>Бочки не настроены</div>
+          <div>Ёмкости добавляются через бэкенд API</div>
+        </div>`;
+      } else {
+        barrels.forEach(b => {
+          const lowCls = b.is_low ? 'low' : '';
+          const card = document.createElement('div');
+          card.className = 'barrel-card';
+          card.innerHTML = `
+            <div class="barrel-header">
+              <span class="barrel-type ${b.fuel_type}">${b.name} (${b.fuel_type})</span>
+              <span class="barrel-stats">
+                <span class="barrel-stats-value">${Number(b.current).toLocaleString()} л</span>
+                <span>${Number(b.capacity).toLocaleString()} л</span>
+              </span>
+            </div>
+            <div class="barrel-level-wrap">
+              <div class="barrel-level-fill ${lowCls}" style="width: ${b.remaining_pct}%;">
+                ${b.remaining_pct}%
+              </div>
+            </div>
+            <div class="barrel-stats">
+              <span>порог уведомления: ${b.threshold_liters} л</span>
+              <span>уровень: ${b.formatted_remaining}</span>
+            </div>
+          `;
+          mainContent.appendChild(card);
+        });
+      }
+      main.appendChild(mainContent);
+    } catch (err) {
+      main.innerHTML = '<div class="empty-state">Не удалось загрузить бочки</div>';
+    }
+  }
+
+  function refreshBarrels() { loadBarrels(); }
 
   // ------------------------------------------------------------
   // Reports tab
   // ------------------------------------------------------------
-  function renderReports() {
-    const main = document.getElementById('app-main');
-    main.innerHTML = '';
+  function loadReports() {
+    const main = getView('reports');
+    if (!main) return;
 
-    const header = document.createElement('div');
-    header.className = 'card';
-    header.innerHTML = `
-      <div class="card-title">Отчеты и экспорт</div>
-      <div style="margin-top: var(--spacing-sm);">
-        <label class="field-label">Период</label>
-        <select id="report-period" class="field-select">
-          <option value="week">Неделя</option>
-          <option value="month" selected>Месяц</option>
-          <option value="year">Год</option>
-          <option value="all">Весь период</option>
-        </select>
-        <button class="btn btn-primary mt-sm" onclick="generateReport()">Сформировать отчёт</button>
+    main.innerHTML = `
+      <div class="card">
+        <div class="card-title">Отчеты и экспорт</div>
+        <div style="margin-top: var(--spacing-sm);">
+          <label class="field-label" for="report-period">Период</label>
+          <select id="report-period" class="field-select">
+            <option value="week">Неделя</option>
+            <option value="month" selected>Месяц</option>
+            <option value="year">Год</option>
+            <option value="all">Весь период</option>
+          </select>
+          <button class="btn btn-primary mt-sm" onclick="generateReport()">Сформировать отчёт</button>
+        </div>
+      </div>
+      <div style="margin-top: var(--spacing-md);">
+        <p>Нажмите кнопку выше для формирования отчёта.</p>
+        <p>Экспорт в CSV/PDF будет добавлен в следующих версиях.</p>
       </div>
     `;
-    main.appendChild(header);
-
-    const mainContent = document.createElement('div');
-    mainContent.style.marginTop = 'var(--spacing-md)';
-    mainContent.innerHTML = `
-      <p>Нажмите кнопку выше для формирования отчёта.</p>
-      <p>Экспорт в CSV/PDF будет добавлен в следующих версиях.</p>
-    `;
-    main.appendChild(mainContent);
   }
 
   function generateReport() {
-    const period = document.getElementById('report-period').value;
+    const select = document.getElementById('report-period');
+    const period = select ? select.value : 'month';
     apiFetch(`/api/dashboard?period=${period}`)
       .then(r => r.json())
       .then(data => {
-        // Simple PDF-like view
-        const lines = [`Car Tracker — Отчет за ${period}`, '===', '',
+        const lines = [`Car Tracker — Отчёт ${PERIOD_NAMES[period] || period}`, '===', '',
           `Итоговая сумма: ₴ ${Number(data.total_amount).toLocaleString()}`,
           '',
           'Топ-5 фур по затратам:'];
-        data.top_vehicles.slice(0, 5).forEach(v => {
+        (data.top_vehicles || []).slice(0, 5).forEach(v => {
           lines.push(`  - ${v.brand} ${v.plate}: ₴ ${v.total.toLocaleString()}`);
         });
         lines.push('', 'Структура по категориям:');
-        data.by_category.forEach(c => {
+        (data.by_category || []).forEach(c => {
           lines.push(`  - ${c.category}: ₴ ${c.total.toLocaleString()}`);
         });
         tg.showAlert(lines.join('\n'));
@@ -650,21 +888,27 @@
   }
 
   // ------------------------------------------------------------
+  // Экспорт в window: разметка вызывает эти функции через onclick=
+  // ------------------------------------------------------------
+  window.renderVehiclesList = renderVehiclesList;
+  window.renderExpensesList = renderExpensesList;
+  window.applyExpenseFilters = applyExpenseFilters;
+  window.clearExpenseFilters = clearExpenseFilters;
+  window.openExpenseForm = openExpenseForm;
+  window.openVehicleForm = openVehicleForm;
+  window.refreshBarrels = refreshBarrels;
+  window.generateReport = generateReport;
+  window.saveVehicle = saveVehicle;
+  window.saveExpense = saveExpense;
+  window.showTab = showTab;
+
+  // ------------------------------------------------------------
   // Initialization
   // ------------------------------------------------------------
   initAuth().then(ok => {
     // Без авторизации данные недоступны - показывать их незачем.
     if (!ok) return;
-    // Load data for all tabs
-    loadVehicles();
-    loadExpenses();
-
-    // Set up tab switching after data loads
-    setTimeout(() => {
-      // Dashboard first
-      apiFetch('/api/dashboard?period=month')
-        .then(r => r.json())
-        .then(data => renderDashboard(data));
-    }, 500);
+    ensureViews();
+    showTab('dashboard');
   });
 })();

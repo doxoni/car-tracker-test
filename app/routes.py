@@ -659,6 +659,7 @@ def dashboard():
                 "fuel_type": b.fuel_type,
                 "current": b.current_liters,
                 "capacity": b.capacity_liters,
+                "threshold_liters": b.threshold_liters,
                 "remaining_pct": b.remaining_pct,
                 "is_low": b.is_low,
                 "formatted_current": b.formatted_current,
