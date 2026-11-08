@@ -5,18 +5,22 @@
 #
 # Что делает:
 #   1. Если файл .db_connection.txt уже есть - ничего не создаёт, выходит.
-#   2. Проверяет биллинг-аккаунт Google Cloud. Если он есть - создаёт
-#      инстанс Cloud SQL (бесплатный тариф db-f1-micro) и базу в нём.
-#   3. Если биллинга нет - предлагает Neon: бесплатный PostgreSQL,
-#      карта не нужна. Пользователь копирует строку подключения из
-#      консоли Neon и вставляет её прямо в это окно.
+#   2. По умолчанию создаёт базу в Neon: бесплатный PostgreSQL навсегда,
+#      карта не нужна, лимиты не кончаются.
+#   3. Cloud SQL (Google) - только если явно попросить ключом -UseCloudSql.
+#      Важно: бесплатного тарифа у Cloud SQL больше нет! Есть только
+#      30-дневный пробный период и $300 кредита на 90 дней. После этого
+#      начинается списание ~$15/мес, а если с карты списать нельзя -
+#      аккаунт блокируется и база удаляется. Поэтому по умолчанию Neon.
 #   4. Сохраняет строку подключения в .db_connection.txt.
 #
 # NOTE: файл сохранён в UTF-8 с BOM - так Windows PowerShell 5.1 (которым
 # запускается setup_all.cmd) правильно читает русский текст.
 
 param(
-    [switch]$Force
+    [switch]$Force,
+    # Явное согласие на платный Google Cloud SQL. Без этого ключа - Neon.
+    [switch]$UseCloudSql
 )
 
 $ErrorActionPreference = "Continue"
@@ -26,10 +30,10 @@ $INSTANCE   = "cars-tracker-db"
 $DB_NAME    = "cars"
 $DB_USER    = "car_tracker"
 $DB_PASS    = "Ct_" + [guid]::NewGuid().ToString("N").Substring(0,20)
-$REGION     = "us-central1"     # единственный регион с бесплатным db-f1-micro
-$TIER       = "db-f1-micro"      # free tier: 1 vCPU, 0.75 ГБ RAM
+$REGION     = "us-central1"
+$TIER       = "db-f1-micro"      # 2 vCPU (shared), 0.6 ГБ RAM
 $DB_VERSION = "POSTGRES_15"
-$STORAGE_GB = 10                 # free tier: 10 ГБ
+$STORAGE_GB = 10
 $CONSOLE_BILLING_URL = "https://console.cloud.google.com/billing/create?project=$PROJECT"
 $NEON_URL = "https://console.neon.tech/app"
 $NEON_KEYS_URL = "https://console.neon.tech/app/settings/api-keys"
@@ -90,24 +94,39 @@ if (-not $GcloudExe) {
     $script:GcloudExe = $GcloudExe
 }
 
-# ---------- 2. Billing account ----------
-# Cloud SQL нельзя создать без биллинг-аккаунта, а Google требует
-# привязанный способ оплаты даже для бесплатного тарифа. Если счёта
-# нет - предлагаем Neon, там карта не нужна.
+# ---------- 2. Выбор провайдера ----------
+# По умолчанию - Neon. Причины:
+#   - бесплатный навсегда, карта не нужна;
+#   - у Cloud SQL бесплатного тарифа больше нет: только 30 дней trial и
+#     $300 кредита на 90 дней, потом списание ~$15/мес;
+#   - с картой без денег списание не пройдёт -> аккаунт заблокируют,
+#     ресурсы остановят, через 30 дней базу удалят.
+# Поэтому Cloud SQL включается только явным ключом -UseCloudSql.
 $hasBilling = $false
 $billingAccount = ""
-if ($GcloudExe) {
-    Step "Checking billing account"
-    $accounts = (Invoke-Gcloud -GcloudArgs @("billing","accounts","list","--format=value(name)") -AllowFail).Trim()
-    # gcloud печатает "Listed 0 items." вместо пустого вывода - это не счёт
-    $accountLine = @($accounts -split "`n" | Where-Object { $_ -match "^billingAccounts/" } | Select-Object -First 1)
-    if ($accountLine) {
-        $billingAccount = $accountLine[0].Trim()
-        $hasBilling = $true
-        Write-Host "Billing account: $billingAccount"
-    } else {
-        Write-Host "Биллинг-аккаунта Google нет." -ForegroundColor Yellow
+if ($UseCloudSql) {
+    Step "Проверяем биллинг-аккаунт Google (Cloud SQL)"
+    Write-Host ""
+    Write-Host "ВНИМАНИЕ: у Cloud SQL больше нет бесплатного тарифа." -ForegroundColor Yellow
+    Write-Host "Будет $300 кредита на 90 дней, потом списание ~`$15/мес." -ForegroundColor Yellow
+    Write-Host "Если с карты списать нельзя - базу удалят через 30 дней." -ForegroundColor Yellow
+    Write-Host ""
+    if ($GcloudExe) {
+        $accounts = (Invoke-Gcloud -GcloudArgs @("billing","accounts","list","--format=value(name)") -AllowFail).Trim()
+        # gcloud печатает "Listed 0 items." вместо пустого вывода - это не счёт
+        $accountLine = @($accounts -split "`n" | Where-Object { $_ -match "^billingAccounts/" } | Select-Object -First 1)
+        if ($accountLine) {
+            $billingAccount = $accountLine[0].Trim()
+            $hasBilling = $true
+            Write-Host "Billing account: $billingAccount"
+        } else {
+            Write-Host "Биллинг-аккаунта Google нет." -ForegroundColor Yellow
+            Write-Host "Создать: $CONSOLE_BILLING_URL" -ForegroundColor Cyan
+        }
     }
+} else {
+    Write-Host "Провайдер: Neon (бесплатно навсегда, карта не нужна)." -ForegroundColor Green
+    Write-Host "Если хочешь Google Cloud SQL - запусти с ключом -UseCloudSql." -ForegroundColor DarkGray
 }
 
 if ($hasBilling) {
@@ -127,8 +146,8 @@ if ($hasBilling) {
     # NOTE: gcloud sql addresses is missing in this SDK build, so the instance
     # gets its built-in public IP (--assign-ip). The IP stays the same for the
     # whole life of the instance.
-    # Free tier: shared CPU, 10 GB storage, no automatic backups (they are
-    # billed separately), no storage auto-increase.
+    # Бесплатного тарифа нет: берём самый дешёвый инстанс, отключаем
+    # бэкапы (они платные) и автоувеличение диска.
     Step "Creating instance $INSTANCE"
     $exists = Invoke-Gcloud -GcloudArgs @("sql","instances","describe",$INSTANCE,"--project=$PROJECT","--format=value(name)") -AllowFail
     if ($exists -match $INSTANCE) {
@@ -192,7 +211,7 @@ if ($hasBilling) {
         "DB_SSLMODE=require"
     ) | Set-Content -Path $outFile -Encoding UTF8
 } else {
-    # ---------- 3. Neon (без карты) ----------
+    # ---------- 3. Neon (бесплатно навсегда, карта не нужна) ----------
     # Если есть ключ Neon - проект создаётся сам, через API.
     $neonKeyFile = Join-Path $PSScriptRoot "neon_key.txt"
     if (Test-Path $neonKeyFile) {
@@ -205,8 +224,9 @@ if ($hasBilling) {
     } else {
         Step "Настройка базы в Neon"
         Write-Host ""
-        Write-Host "Google Cloud требует карту для биллинга, а она не нужна для Neon:" -ForegroundColor Cyan
-        Write-Host "Neon - бесплатный PostgreSQL, карта не требуется, база не засыпает насовсем." -ForegroundColor Cyan
+        Write-Host "Neon - бесплатный PostgreSQL навсегда, карта не требуется." -ForegroundColor Cyan
+        Write-Host "Google Cloud SQL без карты не подходит: там бесплатного тарифа" -ForegroundColor Cyan
+        Write-Host "больше нет, а с карты без денег базу потом удалят." -ForegroundColor Cyan
         Write-Host ""
         Write-Host "Сделай один раз в браузере (2 минуты):" -ForegroundColor Cyan
         Write-Host "  1. Открой: $NEON_URL"

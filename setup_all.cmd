@@ -7,8 +7,8 @@ REM
 REM Число - это твой Telegram ID, из него делается админ (уровень 3).
 REM
 REM Что делает:
-REM   1. Создаёт облачную базу PostgreSQL (Google Cloud SQL, а если нет
-REM      биллинга Google - Neon, там карта не нужна).
+REM   1. Создаёт облачную базу PostgreSQL в Neon (бесплатно навсегда,
+REM      карта не нужна).
 REM   2. Создаёт/обновляет сервис на Render, ставит DATABASE_URL, деплоит.
 REM   3. Создаёт админа в базе.
 REM
