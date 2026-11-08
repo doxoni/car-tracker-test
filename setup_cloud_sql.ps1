@@ -1,4 +1,4 @@
-﻿# setup_cloud_sql.ps1 - creates Google Cloud SQL PostgreSQL for car-tracker.
+# setup_cloud_sql.ps1 - creates Google Cloud SQL PostgreSQL for car-tracker.
 #
 # Run in PowerShell from the project folder:
 #   powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1
@@ -25,76 +25,92 @@ $DB_VERSION = "POSTGRES_15"
 
 function Step($msg) { Write-Host ""; Write-Host "=== $msg ===" -ForegroundColor Cyan }
 
-# Run a native command, print its output, fail on non-zero exit code.
-function Gcloud {
-    param([string[]]$Args, [switch]$AllowFail)
-    $out = & $gcloud @Args 2>&1
+# Run gcloud with given arguments, print its output, fail on non-zero exit code.
+# NOTE: parameter is named GcloudArgs (NOT $Args - that name is reserved by PowerShell).
+function Invoke-Gcloud {
+    param([string[]]$GcloudArgs, [switch]$AllowFail)
+    $out = & $script:GcloudExe @GcloudArgs 2>&1
     $code = $LASTEXITCODE
     $text = ($out | ForEach-Object { "$_" }) -join "`n"
     if ($text) { Write-Host $text }
     if ($code -ne 0 -and -not $AllowFail) {
-        throw "gcloud failed (exit $code): $($Args -join ' ')"
+        throw "gcloud failed (exit $code): $($GcloudArgs -join ' ')"
     }
     return $text
 }
 
 # ---------- 1. Locate gcloud ----------
 Step "Checking gcloud"
-$gcloud = Get-Command gcloud -ErrorAction SilentlyContinue
-if (-not $gcloud) {
-    $candidates = @(
-        "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
-        "$env:LOCALAPPDATA\Google\Cloud SDK\bin\gcloud.cmd",
-        "C:\Program Files (x86)\Google\Cloud SDK\bin\gcloud.cmd",
-        "C:\Program Files\Google\Cloud SDK\bin\gcloud.cmd"
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path $c) { $gcloud = $c; break }
-    }
+$GcloudExe = $null
+$candidates = @(
+    "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
+    "$env:LOCALAPPDATA\Google\Cloud SDK\bin\gcloud.cmd",
+    "C:\Program Files (x86)\Google\Cloud SDK\bin\gcloud.cmd",
+    "C:\Program Files\Google\Cloud SDK\bin\gcloud.cmd"
+)
+foreach ($c in $candidates) {
+    if (Test-Path $c) { $GcloudExe = $c; break }
 }
-if (-not $gcloud) { Write-Error "gcloud not found. Install: winget install --id Google.CloudSDK" }
-Write-Host "gcloud: $gcloud"
+if (-not $GcloudExe) {
+    $cmd = Get-Command gcloud.cmd -CommandType Application -ErrorAction SilentlyContinue
+    if ($cmd) { $GcloudExe = $cmd.Source }
+}
+if (-not $GcloudExe) {
+    Write-Error "gcloud not found. Install: winget install --id Google.CloudSDK"
+    exit 1
+}
+$script:GcloudExe = $GcloudExe
+Write-Host "gcloud: $GcloudExe"
 
 # ---------- 2. API + project ----------
 Step "Enabling Cloud SQL Admin API"
-Gcloud -Args @("services", "enable", "sqladmin.googleapis.com", "--project=$PROJECT", "--quiet") | Out-Null
-Gcloud -Args @("config", "set", "project", $PROJECT) | Out-Null
+Invoke-Gcloud -GcloudArgs @("services", "enable", "sqladmin.googleapis.com", "--project=$PROJECT", "--quiet") | Out-Null
+Invoke-Gcloud -GcloudArgs @("config", "set", "project", $PROJECT) | Out-Null
 
-# ---------- 3. Static public IP ----------
-Step "Reserving static IP"
-$ipName = "$INSTANCE-ip"
-$hasIp = Gcloud -Args @("sql", "addresses", "list", "--project=$PROJECT", "--filter=name~$ipName", "--format=value(name)") -AllowFail
-if (-not $hasIp) {
-    Gcloud -Args @("sql", "addresses", "create", $ipName, "--region=$REGION", "--project=$PROJECT") | Out-Null
-}
-
-# ---------- 4. Instance ----------
+# ---------- 3. Instance ----------
+# NOTE: gcloud sql addresses is missing in this SDK build, so the instance
+# gets its built-in public IP (--assign-ip). The IP stays the same for the
+# whole life of the instance.
 Step "Creating instance $INSTANCE"
-$exists = Gcloud -Args @("sql", "instances", "describe", $INSTANCE, "--project=$PROJECT", "--format=value(name)") -AllowFail
+$exists = Invoke-Gcloud -GcloudArgs @("sql", "instances", "describe", $INSTANCE, "--project=$PROJECT", "--format=value(name)") -AllowFail
 if ($exists -match $INSTANCE) {
     Write-Host "Instance already exists - patching instead."
-    Gcloud -Args @("sql", "instances", "patch", $INSTANCE, "--assign-ip", $ipName, "--authorized-networks=0.0.0.0/0", "--project=$PROJECT") | Out-Null
+    Invoke-Gcloud -GcloudArgs @("sql", "instances", "patch", $INSTANCE, "--assign-ip", "--authorized-networks=0.0.0.0/0", "--project=$PROJECT") | Out-Null
 } else {
-    Gcloud -Args @("sql", "instances", "create", $INSTANCE,
+    Invoke-Gcloud -GcloudArgs @("sql", "instances", "create", $INSTANCE,
         "--database-version=$DB_VERSION",
         "--tier=$TIER",
         "--region=$REGION",
         "--availability-type=ZONAL",
-        "--assign-ip", $ipName,
+        "--assign-ip",
         "--project=$PROJECT") | Out-Null
-    Gcloud -Args @("sql", "instances", "patch", $INSTANCE, "--authorized-networks=0.0.0.0/0", "--project=$PROJECT") | Out-Null
+    Invoke-Gcloud -GcloudArgs @("sql", "instances", "patch", $INSTANCE, "--authorized-networks=0.0.0.0/0", "--project=$PROJECT") | Out-Null
+}
+
+# ---------- 4. Wait until the instance is RUNNABLE ----------
+Step "Waiting for the instance to become RUNNABLE"
+for ($i = 1; $i -le 60; $i++) {
+    $state = Invoke-Gcloud -GcloudArgs @("sql", "instances", "describe", $INSTANCE, "--project=$PROJECT", "--format=value(state)") -AllowFail
+    $state = $state.Trim()
+    Write-Host "  state: $state"
+    if ($state -eq "RUNNABLE") { break }
+    if ($state -eq "FAILED") { throw "Instance creation failed. Check: gcloud sql operations list --instance=$INSTANCE --project=$PROJECT" }
+    Start-Sleep -Seconds 10
 }
 
 # ---------- 5. Database and user ----------
 Step "Creating database $DB_NAME and user $DB_USER"
-Gcloud -Args @("sql", "databases", "create", $DB_NAME, "--instance=$INSTANCE", "--project=$PROJECT") -AllowFail | Out-Null
-Gcloud -Args @("sql", "users", "create", $DB_USER, "--instance=$INSTANCE", "--password=$DB_PASS", "--project=$PROJECT") -AllowFail | Out-Null
+Invoke-Gcloud -GcloudArgs @("sql", "databases", "create", $DB_NAME, "--instance=$INSTANCE", "--project=$PROJECT") -AllowFail | Out-Null
+# set-password always runs, so a re-run keeps the password in sync with the saved file
+Invoke-Gcloud -GcloudArgs @("sql", "users", "set-password", $DB_USER, "--instance=$INSTANCE", "--password=$DB_PASS", "--project=$PROJECT") -AllowFail | Out-Null
+Invoke-Gcloud -GcloudArgs @("sql", "users", "create", $DB_USER, "--instance=$INSTANCE", "--password=$DB_PASS", "--project=$PROJECT") -AllowFail | Out-Null
 
 # ---------- 6. Connection string ----------
 Step "Reading public IP"
-$ipRaw = Gcloud -Args @("sql", "instances", "describe", $INSTANCE, "--project=$PROJECT", "--format=value(ipAddresses)")
-$ip = ($ipRaw -split "[;,\r\n]" | Where-Object { $_ -match "^\d+\.\d+\.\d+\.\d+$" } | Select-Object -First 1)
-if (-not $ip) { throw "Could not read instance IP from: $ipRaw" }
+$ipRaw = Invoke-Gcloud -GcloudArgs @("sql", "instances", "describe", $INSTANCE, "--project=$PROJECT", "--format=value(ipAddresses)")
+$m = [regex]::Match($ipRaw, "(\d+\.\d+\.\d+\.\d+)")
+if (-not $m.Success) { throw "Could not read instance IP from: $ipRaw" }
+$ip = $m.Groups[1].Value
 
 $url = "postgresql://${DB_USER}:${DB_PASS}@${ip}:5432/${DB_NAME}?sslmode=require"
 $outFile = Join-Path $PSScriptRoot ".cloudsql_connection.txt"
