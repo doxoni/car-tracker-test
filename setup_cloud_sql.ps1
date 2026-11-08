@@ -97,6 +97,10 @@ if (-not $accounts) {
     Write-Host "  4. Run this script again:"
     Write-Host "     powershell -ExecutionPolicy Bypass -File setup_cloud_sql.ps1"
     Write-Host ""
+    # Открываем страницу сразу - меньше шагов для пользователя.
+    try { Start-Process $CONSOLE_BILLING_URL } catch { }
+    Write-Host "The page has been opened in your browser. Create the account there, then run this command again."
+    Write-Host ""
     exit 2
 }
 $billingAccount = ($accounts -split "`n")[0].Trim()

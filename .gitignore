@@ -53,8 +53,9 @@ app/.env.example
 *.sqlite3
 
 # Alembic
-migrations/versions/*.py
-!migrations/versions/001_initial.py
+# Миграции - часть схемы БД, они нужны в Git. Игнорируем только черновики.
+migrations/versions/*_draft.py
+migrations/versions/*_tmp.py
 
 # Logs
 *.log
