@@ -30,6 +30,12 @@ from app.auth import require_auth, require_level, require_can_view_logs, require
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+@bp.get("/health")
+def health():
+    """Простой health check для Render (не требует авторизации)."""
+    return jsonify({"status": "ok"})
+
+
 # ---------- Helpers ----------
 
 def _parse_date(date_str: str):

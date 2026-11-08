@@ -10,8 +10,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копировать код
 COPY app/ ./app/
-COPY static/ ./static/
-COPY templates/ ./templates/
 COPY migrations/ ./migrations/
 COPY Procfile .
 

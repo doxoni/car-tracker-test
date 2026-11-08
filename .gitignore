@@ -44,6 +44,8 @@ Thumbs.db
 .env
 .envv
 .envv.local
+app/.env.env
+app/.env.example
 
 # Database
 *.db

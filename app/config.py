@@ -27,7 +27,7 @@ class Config:
     APP_URL = os.getenv("APP_URL", "http://localhost:5000")
 
     # Роли
-    ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+    ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_TELEGRAM_ID") or "0")
     WHITELISTED_TELEGRAM_IDS = [
         int(x) for x in os.getenv("WHITELISTED_TELEGRAM_IDS", "").split(",")
         if x.strip().isdigit()
@@ -35,3 +35,7 @@ class Config:
 
     # Период синхронизации с Wialon (минуты)
     WIALON_SYNC_INTERVAL = int(os.getenv("WIALON_SYNC_INTERVAL", "15"))
+
+    # DEV режим: пропускает проверку Telegram initData, использует DEV_USER_ID
+    DEV_MODE = os.getenv("DEV_MODE", "false").lower() in ("1", "true", "yes")
+    DEV_USER_ID = int(os.getenv("DEV_USER_ID", "0"))
