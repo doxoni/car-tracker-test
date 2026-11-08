@@ -43,6 +43,13 @@ SERVICE_REPO = "https://github.com/doxoni/car-tracker-test"
 SERVICE_BRANCH = "test"
 SERVICE_PLAN = "free"
 
+# Команда запуска. -c gunicorn.conf.py подключает хук post_worker_init:
+# бот поднимается в том процессе, который обслуживает запросы.
+START_COMMAND = (
+    "gunicorn -c gunicorn.conf.py --workers 1 --threads 4 --timeout 120 "
+    "--bind 0.0.0.0:$PORT wsgi:app"
+)
+
 
 def fail(message: str):
     """Остановить работу с понятным сообщением."""
@@ -207,15 +214,58 @@ def create_service(owner_id: str, key: str) -> dict:
             "healthCheckPath": "/api/health",
             "envSpecificDetails": {
                 "buildCommand": "pip install -r requirements.txt",
-                "startCommand": (
-                    "gunicorn --workers 1 --threads 4 --timeout 120 "
-                    "--bind 0.0.0.0:$PORT wsgi:app"
-                ),
+                "startCommand": START_COMMAND,
             },
         },
     }
     result = api("POST", "/services", key, payload)
     return result.get("service", result)
+
+
+def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
+    """Обновить команду запуска существующего сервиса.
+
+    Формат тот же, что и при создании: plan лежит внутри serviceDetails,
+    иначе Render отвечает 402 ("Payment information is required").
+    Ошибка здесь не критична - gunicorn и сам подхватывает gunicorn.conf.py
+    из рабочей папки, поэтому при неудаче просто пишем предупреждение.
+    """
+    try:
+        details = api("GET", f"/services/{service_id}", key)
+        details = details.get("service", details)
+        service_details = details.get("serviceDetails") or {}
+        env_details = service_details.get("envSpecificDetails") or {}
+        if env_details.get("startCommand") == START_COMMAND:
+            return True
+        payload = {
+            "type": "web_service",
+            "name": service_details.get("name") or SERVICE_NAME,
+            "ownerId": owner_id,
+            "repo": details.get("repo") or SERVICE_REPO,
+            "branch": details.get("branch") or SERVICE_BRANCH,
+            "autoDeployTrigger": details.get("autoDeployTrigger") or "commit",
+            "serviceDetails": {
+                "runtime": service_details.get("runtime") or "python",
+                "plan": service_details.get("plan") or SERVICE_PLAN,
+                "numInstances": service_details.get("numInstances") or 1,
+                "region": service_details.get("region") or "oregon",
+                "healthCheckPath": service_details.get("healthCheckPath")
+                or "/api/health",
+                "envSpecificDetails": {
+                    "buildCommand": env_details.get("buildCommand")
+                    or "pip install -r requirements.txt",
+                    "startCommand": START_COMMAND,
+                },
+            },
+        }
+        api("PUT", f"/services/{service_id}", key, payload)
+        return True
+    except SystemExit:
+        print("⚠️  Команду запуска обновить не удалось - деплой продолжим.")
+        return False
+    except Exception as exc:
+        print(f"⚠️  Не удалось обновить команду запуска: {exc}")
+        return False
 
 
 def set_env(service_id: str, key: str, values: dict):
@@ -334,6 +384,7 @@ def main():
     if service:
         print(f"Сервис {SERVICE_NAME} найден: {service['id']}")
         service_id = service["id"]
+        update_start_command(service_id, owner_id, key)
     else:
         print(f"Сервис {SERVICE_NAME} не найден - создаю")
         service = create_service(owner_id, key)

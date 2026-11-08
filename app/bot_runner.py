@@ -34,6 +34,18 @@ _bot_thread = None
 _heartbeat_thread = None
 # Флаг: бот уже стартовал в этом процессе (чтобы не запустить дважды).
 _started = False
+# Когда последний раз пытались поднять бота: чтобы при падении не спамить
+# перезапусками на каждом запросе.
+_last_start_attempt = 0.0
+# Откуда запустили бота - для диагностики в /api/health.
+_started_by = ""
+# Пауза между попытками перезапуска после падения, секунды.
+RESTART_COOLDOWN = 60
+# Замок на запуск: запросы идут параллельно, старт должен быть один.
+_start_lock = threading.Lock()
+# PID процесса, в котором модуль загрузился. Если он не совпадает с текущим
+# - значит процесс был создан форком уже после импорта (gunicorn с preload).
+_import_pid = os.getpid()
 
 
 def bot_state() -> dict:
@@ -43,10 +55,27 @@ def bot_state() -> dict:
     state = dict(BOT_STATE)
     state["thread_alive"] = bool(_bot_thread and _bot_thread.is_alive())
     state["pid"] = os.getpid()
+    state["ppid"] = os.getppid()
+    state["parent_cmd"] = _parent_cmd()
     state["heartbeat_age"] = round(time.time() - BOT_STATE["heartbeat"], 1)
+    state["started_by"] = _started_by
+    # PID процесса, в котором модуль загрузился. Если он отличается от
+    # текущего - процесс создан форком уже после импорта, и потоки бота
+    # в нём не пережили форк.
+    state["import_pid"] = _import_pid
+    state["forked"] = _import_pid != os.getpid()
     # Список потоков процесса: видно, есть ли вообще поток бота.
     state["threads"] = sorted(t.name for t in threading.enumerate())
     return state
+
+
+def _parent_cmd() -> str:
+    """Команда родительского процесса - показывает, кто форкнул воркера."""
+    try:
+        with open(f"/proc/{os.getppid()}/cmdline", "rb") as f:
+            return f.read().replace(b"\0", b" ").decode("utf-8", "replace")[:120]
+    except OSError:
+        return ""
 
 
 def _stage(name: str) -> None:
@@ -128,9 +157,71 @@ def _install_thread_excepthook():
     threading.excepthook = _hook
 
 
-def start_bot_thread() -> threading.Thread | None:
-    """Поднять бота в фоновом потоке. Возвращает поток или None."""
-    global _bot_thread, _heartbeat_thread, _started
+def ensure_bot_started(source: str = "request"):
+    """Поднять бота, если в этом процессе он ещё не работает.
+
+    Вызывается из трёх мест:
+      - хук post_worker_init gunicorn (основной путь на Render);
+      - хук после форка - если приложение импортировали до форка;
+      - before_request - запасной вариант, если хуки не сработали.
+
+    Возвращает поток бота или None.
+    """
+    if not bot_enabled():
+        return None
+
+    with _start_lock:
+        if _bot_thread is not None and _bot_thread.is_alive():
+            return _bot_thread
+
+        if _started:
+            # Бот уже пробовал запуститься и упал. Повторяем не сразу,
+            # чтобы не долбить Telegram при каждом запросе.
+            if time.time() - _last_start_attempt < RESTART_COOLDOWN:
+                return None
+
+        return start_bot_thread(source)
+
+
+def reset_after_fork():
+    """Сбросить состояние бота после форка.
+
+    Потоки при форке не переносятся: в дочернем процессе остаётся только
+    копия переменных. Поэтому состояние сбрасываем - иначе /api/health
+    будет показывать замороженное состояние из родительского процесса.
+    Запуск бота делает вызывающий код (хук gunicorn или обработчик
+    запроса) - он уже выполняется в нужном процессе.
+    """
+    global _bot_thread, _heartbeat_thread, _started, _last_start_attempt, _start_lock
+
+    _bot_thread = None
+    _heartbeat_thread = None
+    _started = False
+    _last_start_attempt = 0.0
+    # Замок могли удерживать потоки родительского процесса - в дочернем
+    # их нет, а сам замок остался в запертом состоянии. Делаем новый.
+    _start_lock = threading.Lock()
+    BOT_STATE.update(
+        {
+            "status": "not_started",
+            "stage": "",
+            "error": "",
+            "traceback": "",
+            "started_at": "",
+            "updated_at": "",
+            "bot_pid": 0,
+            "heartbeat": 0.0,
+        }
+    )
+
+
+def start_bot_thread(source: str = "import") -> threading.Thread | None:
+    """Поднять бота в фоновом потоке. Возвращает поток или None.
+
+    source - откуда запустили ("import", "gunicorn", "request"):
+    попадает в /api/health, чтобы было видно, где бот поднялся.
+    """
+    global _bot_thread, _heartbeat_thread, _started, _started_by, _last_start_attempt
     from datetime import datetime
 
     if not bot_enabled():
@@ -143,12 +234,14 @@ def start_bot_thread() -> threading.Thread | None:
             pass
         return None
 
-    if _started:
+    if _started and _bot_thread is not None and _bot_thread.is_alive():
         # Бот уже поднят в этом процессе - второй раз запускать нельзя,
         # иначе получим конфликт опроса Telegram.
         return _bot_thread
 
     _started = True
+    _started_by = source
+    _last_start_attempt = time.time()
     BOT_STATE["enabled"] = True
     BOT_STATE["bot_pid"] = os.getpid()
     BOT_STATE["heartbeat"] = time.time()

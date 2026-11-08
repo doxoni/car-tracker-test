@@ -14,7 +14,10 @@ COPY bot/ ./bot/
 COPY migrations/ ./migrations/
 COPY wsgi.py .
 COPY Procfile .
+COPY gunicorn.conf.py .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "120", "--bind", "0.0.0.0:5000", "wsgi:app"]
+# -c gunicorn.conf.py: хук post_worker_init поднимает Telegram-бота
+# в том процессе, который обслуживает запросы.
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "--workers", "1", "--threads", "4", "--timeout", "120", "--bind", "0.0.0.0:5000", "wsgi:app"]

@@ -14,14 +14,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app
-from app.bot_runner import start_bot_thread
+from app.bot_runner import ensure_bot_started
 
 application = create_app()
 
 
 def main():
     """Запустить веб-сервер (и бота, если он включён)."""
-    start_bot_thread()
+    ensure_bot_started("local")
     application.run(host="0.0.0.0", port=int(os.getenv("PORT") or 5000))
 
 
