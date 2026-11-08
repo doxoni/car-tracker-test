@@ -25,6 +25,14 @@ import sys
 import time
 from pathlib import Path
 
+# Консоль Windows по умолчанию cp1251 - эмодзи в ней не печатаются.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 import requests
 
 API = "https://api.render.com/v1"
@@ -145,45 +153,78 @@ def api(method: str, path: str, key: str, payload=None):
 
 
 def find_owner(key: str) -> str:
-    """ID владельца аккаунта Render."""
+    """ID владельца аккаунта Render.
+
+    API отдаёт владельцев в виде [{"cursor": ..., "owner": {...}}],
+    поэтому ID берём из вложенного объекта "owner".
+    """
     owners = api("GET", "/owners", key)
     if not owners:
         fail("Не найден владелец аккаунта Render")
-    return owners[0]["id"]
+    first = owners[0]
+    owner = first.get("owner", first)
+    owner_id = owner.get("id")
+    if not owner_id:
+        fail("У ответа Render нет ID владельца")
+    return owner_id
 
 
 def find_service(owner_id: str, key: str):
     """Сервис по имени или None."""
     services = api("GET", f"/services?ownerId={owner_id}", key)
-    for service in services:
-        if service["name"] == SERVICE_NAME:
+    for item in services:
+        service = item.get("service", item)
+        if service.get("name") == SERVICE_NAME:
             return service
     return None
 
 
-def create_service(owner_id: str, key: str, env_vars: list) -> dict:
-    """Создать веб-сервис на Render."""
+def create_service(owner_id: str, key: str) -> dict:
+    """Создать веб-сервис на Render.
+
+    Формат тела - по документации Render API: поля type/name/ownerId лежат
+    на верхнем уровне, а plan, runtime и команды сборки - внутри
+    serviceDetails. Если plan положить наверх, Render отвечает 402
+    ("Payment information is required") - как будто нужен платный план.
+    """
     payload = {
-        "service": {
-            "name": SERVICE_NAME,
-            "ownerId": owner_id,
-            "repo": SERVICE_REPO,
-            "branch": SERVICE_BRANCH,
-            "type": "web",
+        "type": "web_service",
+        "name": SERVICE_NAME,
+        "ownerId": owner_id,
+        "repo": SERVICE_REPO,
+        "branch": SERVICE_BRANCH,
+        "autoDeployTrigger": "commit",
+        "serviceDetails": {
             "runtime": "python",
             "plan": SERVICE_PLAN,
-            "autoDeployTrigger": "commit",
+            "numInstances": 1,
+            "region": "oregon",
             "healthCheckPath": "/api/health",
-            "envVars": env_vars,
-        }
+            "envSpecificDetails": {
+                "buildCommand": "pip install -r requirements.txt",
+                "startCommand": (
+                    "gunicorn --workers 1 --threads 4 --timeout 120 "
+                    "--bind 0.0.0.0:$PORT wsgi:app"
+                ),
+            },
+        },
     }
-    return api("POST", "/services", key, payload)["service"]
+    result = api("POST", "/services", key, payload)
+    return result.get("service", result)
 
 
 def set_env(service_id: str, key: str, values: dict):
-    """Обновить переменные окружения сервиса."""
-    for env_key, env_value in values.items():
-        api("PUT", f"/services/{service_id}/env-vars/{env_key}", key, {"value": env_value})
+    """Обновить переменные окружения сервиса.
+
+    Render принимает список переменных одним запросом PUT. Значения
+    помечаются как secret - в ответе API они не возвращаются.
+    """
+    payload = [
+        {"key": env_key, "value": env_value, "type": "secret"}
+        for env_key, env_value in values.items()
+    ]
+    api("PUT", f"/services/{service_id}/env-vars", key, payload)
+    for env_key in values:
         print(f"  env: {env_key} = OK")
 
 
@@ -290,24 +331,21 @@ def main():
         service_id = service["id"]
     else:
         print(f"Сервис {SERVICE_NAME} не найден - создаю")
-        env_vars = [
-            {"key": "DATABASE_URL", "value": database_url},
-            {"key": "PGSSLMODE", "value": "require"},
-            {"key": "PYTHON_VERSION", "value": "3.12.0"},
-        ]
-        for env_key, env_value in extra.items():
-            env_vars.append({"key": env_key, "value": env_value})
-        service = create_service(owner_id, key, env_vars)
+        service = create_service(owner_id, key)
         service_id = service["id"]
         print(f"Создан: {service_id}")
 
     # APP_URL нужен боту: без него кнопка Mini App ведёт в никуда.
     # Если значение задано в render_env.txt - не перетираем.
     if "APP_URL" not in extra:
-        details = api("GET", f"/services/{service_id}", key)["service"]
-        host = (details.get("serviceDetails") or {}).get("host") or f"{SERVICE_NAME}.onrender.com"
+        details = api("GET", f"/services/{service_id}", key)
+        details = details.get("service", details)
+        host = (
+            (details.get("serviceDetails") or {}).get("url")
+            or f"https://{SERVICE_NAME}.onrender.com"
+        )
         extra = dict(extra)
-        extra["APP_URL"] = f"https://{host}"
+        extra["APP_URL"] = host
 
     values = {
         "DATABASE_URL": database_url,
@@ -328,10 +366,12 @@ def main():
     if not args.no_wait:
         wait_for_deploy(service_id, key)
 
-    service = api("GET", f"/services/{service_id}", key)["service"]
+    details = api("GET", f"/services/{service_id}", key)
+    details = details.get("service", details)
+    host = (details.get("serviceDetails") or {}).get("url") or f"https://{SERVICE_NAME}.onrender.com"
     print("")
-    print(f"URL: https://{service['serviceDetails']['host']}")
-    print(f"Health: https://{service['serviceDetails']['host']}/api/health")
+    print(f"URL: {host}")
+    print(f"Health: {host}/api/health")
 
     if args.telegram_id:
         create_admin(database_url, args.telegram_id, args.name)

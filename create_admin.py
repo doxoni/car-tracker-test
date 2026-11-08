@@ -13,6 +13,14 @@
 
 import sys
 
+# Консоль Windows по умолчанию cp1251 - эмодзи и часть букв в ней не печатаются.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 from app import create_app, db
 from app.models import User
 
