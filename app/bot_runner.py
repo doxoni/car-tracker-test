@@ -7,6 +7,7 @@
 
 import os
 import threading
+import traceback
 
 # Состояние бота - чтобы его видно было через /api/health без доступа
 # к логам Render (их нельзя прочитать через API).
@@ -14,6 +15,7 @@ BOT_STATE = {
     "enabled": False,
     "status": "not_started",
     "error": "",
+    "traceback": "",
     "started_at": "",
 }
 
@@ -21,6 +23,25 @@ BOT_STATE = {
 def bot_state() -> dict:
     """Текущее состояние бота (копия, чтобы отдача не ломала запись)."""
     return dict(BOT_STATE)
+
+
+def _mask(text: str) -> str:
+    """Спрятать секреты из текста ошибки.
+
+    Сообщения Telegram иногда содержат сам токен (например, "The token
+    ... was rejected"), а трейсбек - строку подключения к БД с паролем.
+    /api/health открыт всем, поэтому секретов там быть не должно.
+    """
+    import re
+
+    from app.config import Config
+
+    token = (Config.TELEGRAM_TOKEN or "").strip()
+    if token:
+        text = text.replace(token, "***")
+    # Пароль в строке подключения: postgres://пользователь:пароль@хост
+    text = re.sub(r"(?i)(://[^:/\s]+:)[^@\s]+@", r"\1***@", text)
+    return text
 
 
 def bot_enabled() -> bool:
@@ -46,19 +67,32 @@ def start_bot_thread() -> threading.Thread | None:
     BOT_STATE["enabled"] = True
 
     def _run():
+        # Статус ставим до импорта: если импорт упадёт, в health будет видно,
+        # на каком шаге бот сломался.
+        BOT_STATE["status"] = "starting"
+        BOT_STATE["started_at"] = datetime.now().isoformat(timespec="seconds")
         try:
+            import asyncio
+
             from bot.bot import build_app as build_bot
 
-            bot_app = build_app()
-            BOT_STATE["status"] = "starting"
-            BOT_STATE["started_at"] = datetime.now().isoformat(timespec="seconds")
-            print("🤖 Бот запущен (long polling)...")
-            bot_app.run_polling()
+            bot_app = build_bot()
+            # python-telegram-bot внутри run_polling вызывает
+            # asyncio.get_event_loop(). В потоке, где цикла ещё нет, это
+            # ошибка - поэтому создаём цикл и делаем его текущим для потока.
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            print("🤖 Бот запущен (long polling)...", flush=True)
+            # stop_signals=None: ставить обработчики сигналов можно только
+            # в главном потоке, а бот работает в отдельном.
+            bot_app.run_polling(stop_signals=None)
             BOT_STATE["status"] = "stopped"
-        except Exception as exc:
+        except BaseException as exc:
+            # BaseException, а не Exception: SystemExit и прочие наследники
+            # Exception не ловят, а из-за этого бот молча умирал.
             BOT_STATE["status"] = "error"
-            BOT_STATE["error"] = f"{type(exc).__name__}: {exc}"[:300]
-            print(f"❌ Бот не запустился: {exc}")
+            BOT_STATE["error"] = _mask(f"{type(exc).__name__}: {exc}")[:300]
+            BOT_STATE["traceback"] = _mask(traceback.format_exc())[-800:]
+            print(f"❌ Бот не запустился: {exc}", flush=True)
 
     thread = threading.Thread(target=_run, name="telegram-bot", daemon=True)
     thread.start()
