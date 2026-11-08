@@ -82,6 +82,8 @@ def start_bot_thread() -> threading.Thread | None:
             # ошибка - поэтому создаём цикл и делаем его текущим для потока.
             asyncio.set_event_loop(asyncio.new_event_loop())
             print("🤖 Бот запущен (long polling)...", flush=True)
+            # Бот опрашивает Telegram - значит он работает.
+            BOT_STATE["status"] = "running"
             # stop_signals=None: ставить обработчики сигналов можно только
             # в главном потоке, а бот работает в отдельном.
             bot_app.run_polling(stop_signals=None)
