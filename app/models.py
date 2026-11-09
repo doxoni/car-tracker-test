@@ -93,6 +93,9 @@ class Vehicle(db.Model):
     brand = db.Column(db.String(80), nullable=False)  # марка
     vin = db.Column(db.String(50), unique=True, nullable=True)  # VIN
     driver_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    # Водитель по имени (из старой системы). Не обязателен: в новой системе
+    # за фурой закреплён пользователь Telegram, а имя нужно для актов.
+    assigned_driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=True)
     status = db.Column(db.String(20), default="active")  # active | archived | in_repair
     wialon_id = db.Column(db.BigInteger, unique=True, nullable=True)  # ID в Wialon
     current_mileage = db.Column(db.Integer, default=0)  # пробег (км)
@@ -238,6 +241,106 @@ class AuditLog(db.Model):
 
     def __repr__(self):
         return f"<AuditLog {self.action} {self.entity_type}#{self.entity_id}>"
+
+
+class Driver(db.Model):
+    """Водитель по имени (из старой системы учёта).
+
+    В новой системе водитель - это пользователь Telegram (User). Но в
+    актах и отчётах водитель указывается именем, и один водитель может
+    вести несколько машин, поэтому имя храним отдельной записью.
+    """
+
+    __tablename__ = "drivers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="drivers")
+    vehicles = db.relationship("Vehicle", backref="assigned_driver", lazy=True)
+
+    def __repr__(self):
+        return f"<Driver {self.name}>"
+
+
+class Customer(db.Model):
+    """Клиент (заказчик) - для актов и отчётов по фурам."""
+
+    __tablename__ = "customers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Customer {self.name}>"
+
+
+class FuelEntry(db.Model):
+    """Заправка фуры: литры, цена, сумма, одометр, место заправки."""
+
+    __tablename__ = "fuel_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
+    liters = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    odometer = db.Column(db.Integer, nullable=True)
+    is_full = db.Column(db.Boolean, default=True)
+    location = db.Column(db.String(120), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    vehicle = db.relationship("Vehicle", backref="fuel_entries", lazy=True)
+
+    def __repr__(self):
+        return f"<FuelEntry {self.liters}л>"
+
+
+class ServiceEntry(db.Model):
+    """Техническое обслуживание по фуре (ремонт, ТО)."""
+
+    __tablename__ = "service_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    description = db.Column(db.String(200), nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    odometer = db.Column(db.Integer, nullable=True)
+    next_km = db.Column(db.Integer, nullable=True)
+    next_date = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    vehicle = db.relationship("Vehicle", backref="service_entries", lazy=True)
+
+    def __repr__(self):
+        return f"<ServiceEntry {self.amount}>"
+
+
+class Report(db.Model):
+    """Акт по фуре: клиент, водитель, пробег, оплата."""
+
+    __tablename__ = "reports"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=True)
+    client = db.Column(db.String(120), nullable=True)
+    driver = db.Column(db.String(120), nullable=True)
+    mileage = db.Column(db.Integer, nullable=True)
+    paid = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    vehicle = db.relationship("Vehicle", backref="reports", lazy=True)
+    customer = db.relationship("Customer", backref="reports", lazy=True)
+    driver_ref = db.relationship("Driver", backref="reports", lazy=True)
+
+    def __repr__(self):
+        return f"<Report #{self.id}>"
 
 
 def log_audit(user_id, action, entity_type, entity_id=None, old_values=None, new_values=None):
