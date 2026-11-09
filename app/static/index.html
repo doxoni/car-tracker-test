@@ -3635,12 +3635,24 @@ function showAddCar() {
   document.getElementById("ac-model").value = "";
   document.getElementById("ac-plate").value = "";
   document.getElementById("ac-mileage").value = "";
+  resetSaveCarButton();
   show("screen-addcar");
 }
 
 // Пока машина добавляется, кнопку второй раз нажать нельзя — иначе
 // в базе появятся две одинаковые машины.
 var carSaving = false;
+
+// Вернуть кнопку «Добавить» в обычное состояние: снять блокировку,
+// убрать спиннер. Иначе после сохранения кнопка остаётся с надписью
+// «Добавляю…» и больше не нажимается.
+function resetSaveCarButton() {
+  carSaving = false;
+  const button = document.getElementById("ac-save");
+  if (!button) return;
+  button.disabled = false;
+  button.textContent = "Добавить";
+}
 
 function saveCar() {
   if (carSaving) return;
@@ -3666,12 +3678,11 @@ function saveCar() {
   }).then(function (data) {
     haptic();
     toast(data.message || "Машина добавлена");
+    resetSaveCarButton();
     backToCars();
   }).catch(function (error) {
     errorBox.textContent = error.message;
-    carSaving = false;
-    button.disabled = false;
-    button.textContent = "Добавить";
+    resetSaveCarButton();
   });
 }
 
