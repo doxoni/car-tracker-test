@@ -1,63 +1,3689 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#212121" />
-  <title>Car Tracker — учёт фур</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#212121">
+<title>Автомобили</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #212121;
+    --bg2: #0f0f0f;
+    --text: #f5f5f5;
+    --hint: #8a8a8a;
+    --btn: #3ba3ec;
+    --btn_text: #ffffff;
+    --card: #2b2b2b;
+    --danger: #e53935;
+    --ok: #4caf50;
+    --field: #1c1c1c;
+
+    /* новые переменные (тему Telegram переопределяет из JS) */
+    --text2: #b8b8b8;
+    --line: rgba(255, 255, 255, .14);
+    --chip: rgba(255, 255, 255, .08);
+    --chip_text: #d3d3d3;
+    --btn2: #343434;
+    --btn2_text: #f0f0f0;
+    --btn_faint: rgba(59, 163, 236, .25);
+    --danger_soft: rgba(229, 57, 53, .14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .28);
+    --radius: 16px;
+    --radius-sm: 12px;
+    --maxw: 560px;
+    color-scheme: dark;
+  }
+  html.tg-light { color-scheme: light; }
+  html.tg-dark  { color-scheme: dark; }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0 auto; max-width: var(--maxw);
+    padding: calc(14px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+    overflow-x: hidden;
+  }
+  /* Без задержки отклика на нажатие. */
+  button, input, select, .car-card { touch-action: manipulation; }
+  /* Двойной тап не увеличивает страницу: масштаб отключён. */
+  html, body { touch-action: manipulation; }
+
+  /* Полоска загрузки сверху: пока идёт запрос — видно, что приложение ждёт. */
+  .loadbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 80;
+    background: var(--btn); opacity: 0; pointer-events: none;
+    transition: opacity .15s ease;
+  }
+  .loadbar.on { opacity: 1; animation: loadbar 1s ease-in-out infinite; }
+  @keyframes loadbar {
+    0% { transform: translateX(-70%); }
+    100% { transform: translateX(70%); }
+  }
+
+  /* ---------- заголовки ---------- */
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin: 2px 0 16px; }
+  #screen-cars > h1 { margin-top: 18px; }
+  h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--hint); margin: 22px 0 10px;
+  }
+  .screen-sub { color: var(--hint); font-size: 13px; margin: -10px 0 14px; }
+
+  /* ---------- карточки ---------- */
+  .card {
+    background: var(--card); border-radius: var(--radius); padding: 14px 16px;
+    margin-bottom: 10px; box-shadow: var(--shadow);
+  }
+  .car-card { cursor: pointer; transition: opacity .12s ease, transform .12s ease; }
+  .car-card:active { opacity: .85; transform: scale(.99); }
+  /* Selectable rows in report screen (multi-select). */
+  .r-row { cursor: pointer; user-select: none; }
+  .r-row:hover { background: var(--background, #f0f0f5); }
+  .r-check { flex-shrink: 0; width: 20px; text-align: center; color: var(--hint); font-size: 14px; }
+  .r-row.on .r-check { color: var(--primary); }
+  .car-row { display: flex; align-items: center; gap: 12px; }
+  .car-main { flex: 1; min-width: 0; }
+  .car-title {
+    font-size: 17px; font-weight: 600; letter-spacing: -.2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .car-sub { color: var(--hint); font-size: 13px; margin-top: 3px; }
+  .car-arr { color: var(--hint); font-size: 22px; line-height: 1; flex: 0 0 auto; }
+  #car-head .car-title { font-size: 20px; white-space: normal; }
+
+  /* ---------- чипы ---------- */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  /* Кнопки в карточке машины: скачать историю, заправить из бочки. */
+  .car-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .car-action {
+    width: auto; flex: 1 1 140px; min-height: 42px; padding: 8px 12px;
+    font-size: 14px; font-weight: 500;
+  }
+  .chip {
+    background: var(--chip); color: var(--chip_text);
+    font-size: 12.5px; line-height: 1.35; padding: 5px 10px;
+    border-radius: 999px; white-space: nowrap;
+  }
+  .chip-accent { background: var(--btn); color: var(--btn_text); font-weight: 600; }
+
+  /* ---------- кнопки ---------- */
+  button {
+    font: inherit; color: var(--btn_text); background: var(--btn);
+    border: 0; border-radius: var(--radius-sm); padding: 14px 16px;
+    cursor: pointer; width: 100%; font-weight: 500; min-height: 48px;
+    transition: opacity .12s ease, transform .1s ease;
+  }
+  button:active { opacity: .8; }
+  button.ghost { background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line); }
+  button.danger { background: var(--danger); color: #ffffff; }
+  button:disabled { opacity: .5; }
+  .btn-primary {
+    min-height: 52px; font-size: 16px; font-weight: 600; border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
+  }
+  .btn-secondary {
+    background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line);
+    min-height: 48px; font-weight: 500;
+  }
+  /* Маленькая кнопка «Звіт» на главной: по размеру текста, слева. Зона нажатия чуть шире самой кнопки. */
+  #btn-main-3 {
+    position: relative; display: block; width: auto;
+    min-height: 36px; padding: 6px 16px; margin: 0 0 12px;
+    font-size: 14px; border-radius: 10px;
+  }
+  #btn-main-3::after { content: ""; position: absolute; inset: -4px; }
+  /* Ряд верхних кнопок: «Звіт» и «Затраты» стоят рядом и одинакового размера. */
+  .top-row { display: flex; flex-wrap: nowrap; gap: 8px; margin: 0 0 12px; }
+  .top-row #btn-main-3,
+  .top-row #btn-costs {
+    flex: 1 1 0; width: auto; min-width: 0; margin: 0;
+    min-height: 36px; padding: 6px 16px; font-size: 14px; border-radius: 10px;
+  }
+  #btn-main-3 { position: relative; display: block; }
+  #btn-costs {
+    position: relative; display: inline-flex; align-items: center;
+    justify-content: center; gap: 8px;
+  }
+  #btn-costs::after { content: ""; position: absolute; inset: -4px; }
+  #btn-costs .costs-amount {
+    font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .back {
+    display: inline-flex; align-items: center; gap: 6px;
+    width: auto; min-height: 44px; padding: 6px 8px 6px 0; margin: 0 0 6px;
+    background: transparent; color: var(--btn); font-size: 15px; font-weight: 500;
+  }
+  .back:active { opacity: .6; }
+
+  /* ---------- нижние кнопки экрана бочки ---------- */
+  .barrel-bottom {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+  }
+  .barrel-bottom button { flex: 1 1 160px; width: auto; }
+
+  /* Разъединяем нижние кнопки экрана: между «➕ Добавить» и «📊 Отчёт» */
+  #screen-cars > button:first-of-type,
+  #screen-cars > button:last-of-type {
+    margin-top: 8px;
+  }
+
+  /* ---------- меню внутри машины ---------- */
+  .menu-btn {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 56px; background: var(--card); color: var(--text); text-align: left;
+    padding: 9px 14px; margin-bottom: 8px; border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+  }
+  .menu-btn .ico {
+    flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px; background: var(--chip);
+  }
+  .menu-btn .txt { flex: 1; font-size: 16px; font-weight: 500; }
+  .menu-btn .arr { color: var(--hint); font-size: 20px; line-height: 1; }
+
+  /* ---------- формы ---------- */
+  label {
+    display: block; color: var(--hint); font-size: 13px; font-weight: 500;
+    margin: 14px 0 6px;
+  }
+  .card > label:first-child, #form-fields > label:first-child { margin-top: 0; }
+  input, select, textarea {
+    width: 100%; font: inherit; font-size: 16px; color: var(--text);
+    background: var(--field); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 13px 14px; min-height: 48px;
+    -webkit-appearance: none; appearance: none;
+  }
+  /* Чекбоксы: общий стиль input гасит галочку — возвращаем её. */
+  input[type="checkbox"] {
+    -webkit-appearance: auto; appearance: auto;
+    width: 20px; height: 20px; min-height: 20px; padding: 0; margin: 0;
+    background: transparent; border: 0; border-radius: 0;
+    accent-color: var(--btn);
+  }
+  /* Чекбокс оплати звіту: чорний квадрат з акцентною рамкою, як у решті UI. */
+  .paid-check {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; min-height: 22px;
+    margin: 0 8px 0 0;
+    cursor: pointer;
+  }
+  .paid-check input {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; min-height: 22px;
+    margin: 0; padding: 0;
+    background: var(--card);
+    border: 1.5px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    transition: border-color .15s, background .15s;
+  }
+  .paid-check input:hover { border-color: var(--btn); }
+  .paid-check input:checked {
+    background: var(--btn);
+    border-color: var(--btn);
+  }
+  .paid-check input:checked::after {
+    content: "";
+    position: absolute;
+    left: 5px; top: 1px;
+    width: 6px; height: 11px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .mileage-inline { font-weight: 600; color: var(--text); }
+  textarea { resize: vertical; line-height: 1.45; }
+  input::placeholder, textarea::placeholder { color: var(--hint); opacity: .7; }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--btn); box-shadow: 0 0 0 3px var(--btn_faint);
+  }
+  /* Видимая рамка при наведении с клавиатуры. */
+  button:focus-visible, .back:focus-visible {
+    outline: 2px solid var(--btn); outline-offset: 2px;
+  }
+  input[type="date"] { min-height: 48px; }
+  /* Убираем стандартные стрелочки у числовых полей — свои кнопки «−/＋» удобнее. */
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a8a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    background-size: 18px; padding-right: 44px;
+  }
+  .hint { color: var(--hint); font-size: 13px; margin-top: 6px; }
+  .total { color: var(--hint); font-size: 13px; margin-top: 8px; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 10px; }
+
+  /* ---------- переключатель (сегменты) ---------- */
+  .switch {
+    display: flex; gap: 4px; margin-top: 16px; padding: 4px;
+    background: var(--field); border-radius: var(--radius-sm);
+  }
+  .switch button {
+    flex: 1; min-height: 40px; padding: 9px 8px; border-radius: 9px;
+    background: transparent; color: var(--hint); font-weight: 500;
+  }
+  .switch button.on { background: var(--btn); color: var(--btn_text); }
+
+  /* ---------- история ---------- */
+  .hist-total {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 2px 0 12px; margin-bottom: 2px; border-bottom: 1px solid var(--line);
+  }
+  .hist-total-label { color: var(--hint); font-size: 14px; }
+  .hist-total-sum { font-size: 19px; font-weight: 700; white-space: nowrap; }
+  .item { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .item:last-child { border-bottom: 0; }
+  .item-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .item-title { font-weight: 500; font-size: 15px; }
+  .item-sum { white-space: nowrap; font-weight: 600; }
+  .item-sub { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
+  .report-item { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .report-item:last-child { border-bottom: 0; }
+  .report-item-top { display: flex; align-items: center; gap: 10px; }
+  .r-check { flex: 0 0 auto; width: 22px; height: 22px; min-height: 22px; text-align: center; color: var(--ok); font-size: 15px; font-weight: 700; }
+  .r-check.pending { color: var(--hint); }
+  .report-main { flex: 1; min-width: 0; }
+  .report-driver { font-weight: 500; font-size: 15px; }
+  .report-meta { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
+
+  /* ---------- поле суммы с шагом «−/＋» ---------- */
+  .money-row { display: flex; align-items: stretch; gap: 8px; }
+  .money-row input { flex: 1 1 auto; min-width: 0; }
+  .step-btn {
+    flex: 0 0 auto; width: 56px; min-height: 48px; padding: 0;
+    background: var(--chip); color: var(--text2);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    font-size: 22px; line-height: 1; font-weight: 600;
+  }
+  .step-btn:active { opacity: .7; }
+
+  /* ---------- каталог работ ---------- */
+  .cat-toggle {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    color: var(--text2); font-size: 14px; font-weight: 500; margin: 0 0 8px;
+  }
+  .cat-toggle input {
+    flex: 0 0 auto; width: 20px; height: 20px; min-height: 20px; padding: 0;
+    accent-color: var(--btn);
+  }
+  #catalog-box {
+    background: var(--field); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 4px;
+  }
+  .cat-list {
+    max-height: 320px; overflow-y: auto; margin-top: 6px;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .cat-list::-webkit-scrollbar { width: 6px; }
+  .cat-list::-webkit-scrollbar-track { background: transparent; }
+  .cat-list::-webkit-scrollbar-thumb {
+    background: var(--line); border-radius: 3px;
+  }
+  .cat-list::-webkit-scrollbar-thumb:hover { background: var(--hint); }
+
+/* ---------- выпадающий список подсказок (combobox) для «Что делали» ---------- */
+.autocomplete-wrap {
+  position: relative;
+}
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%; left: 0; right: 0;
+  z-index: 30;
+  margin-top: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity .15s ease, transform .15s ease, visibility .15s;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.autocomplete-dropdown.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.autocomplete-dropdown::-webkit-scrollbar { width: 6px; }
+.autocomplete-dropdown::-webkit-scrollbar-track { background: transparent; }
+.autocomplete-dropdown::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 3px;
+}
+.autocomplete-dropdown::-webkit-scrollbar-thumb:hover { background: var(--hint); }
+.autocomplete-item {
+  display: block; width: 100%; text-align: left;
+  padding: 11px 14px; font: inherit; font-size: 16px;
+  color: var(--text); background: transparent; border: 0; border-radius: 0;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.autocomplete-item:hover,
+.autocomplete-item[aria-selected="true"] {
+  background: var(--chip);
+}
+.autocomplete-item mark {
+  background: var(--btn_faint); color: var(--text);
+  border-radius: 3px; padding: 0 1px;
+}
+.autocomplete-empty {
+  padding: 14px; color: var(--hint); font-size: 14px; text-align: center;
+}
+
+/* ---------- Общий combobox (.combo): Водій, Замовник, «Що робили» ---------- */
+.combo { position: relative; display: block; width: 100%; }
+.combo input[role="combobox"] { padding-right: 56px; }
+.combo-row { display: flex; gap: 14px; align-items: stretch; margin-top: 8px; position: relative; }
+.combo-row label { flex: 0 0 86px; line-height: 1.6; color: var(--text2); font-size: 13px; }
+.combo-row .combo, .combo-row .datefield { flex: 1 1 auto; min-width: 0; width: auto; }
+.combo-row > input { flex: 1 1 auto; min-width: 0; width: auto; }
+.combo input[role="combobox"], .datefield input[type="text"] { text-overflow: ellipsis; }
+.combo-arrow {
+  position: absolute; top: 1px; bottom: 1px; right: 1px;
+  width: 48px; min-height: 0; padding: 0;
+  background: var(--chip); color: var(--text2);
+  border: 0; border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
+  font-size: 16px; line-height: 1; cursor: pointer;
+}
+.combo.open .combo-arrow { color: var(--btn); }
+
+/* ---------- поле даты и календарь ---------- */
+.datefield { position: relative; display: block; width: 100%; }
+.datefield input[type="text"] { cursor: pointer; padding-right: 56px; caret-color: transparent; }
+.datefield-btn {
+  position: absolute; top: 1px; bottom: 1px; right: 1px;
+  width: 48px; min-height: 0; padding: 0;
+  background: var(--chip); color: var(--text2);
+  border: 0; border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.datefield.open .datefield-btn { color: var(--btn); }
+.datefield-btn svg { width: 20px; height: 20px; }
+.cal {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 30;
+  margin-top: 6px; padding: 10px;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-4px);
+  transition: opacity .15s ease, transform .15s ease, visibility .15s;
+}
+.cal.open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); }
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.cal-title { font-size: 15px; font-weight: 600; }
+.cal-nav {
+  width: 44px; min-height: 44px; padding: 0;
+  background: transparent; color: var(--btn); font-size: 22px; line-height: 1;
+}
+.cal-nav:disabled { color: var(--hint); opacity: .4; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.cal-dow { color: var(--hint); font-size: 12px; padding: 4px 0; }
+.cal-day {
+  width: 100%; min-height: 40px; padding: 0;
+  background: transparent; color: var(--text);
+  border: 1px solid transparent; border-radius: 10px;
+  font-size: 15px; font-weight: 400;
+}
+.cal-day:hover { background: var(--chip); }
+.cal-day.today { border-color: var(--btn); }
+.cal-day.sel, .cal-day.sel:hover { background: var(--btn); color: var(--btn_text); font-weight: 600; }
+.cal-day:disabled { color: var(--hint); opacity: .35; background: transparent; cursor: default; }
+.combo-arrow:active { opacity: .7; }
+
+/* Сам список: поверх контента, форму вниз не сдвигает. */
+.suggest-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 30;
+  margin-top: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  overflow: hidden;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .15s ease, transform .15s ease, visibility .15s;
+}
+.suggest-list.open {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transform: translateY(0);
+}
+/* Прокручивается только эта часть: пункт «+ Додати» снизу всегда на виду. */
+.suggest-items {
+  max-height: 188px; overflow-y: auto; overflow-x: hidden;
+  padding: 4px 0; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.suggest-items::-webkit-scrollbar { width: 6px; }
+.suggest-items::-webkit-scrollbar-track { background: transparent; }
+.suggest-items::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.suggest-items::-webkit-scrollbar-thumb:hover { background: var(--hint); }
+.suggest-item {
+  display: flex; align-items: center;
+  min-height: 44px; padding: 10px 14px;
+  font-size: 16px; color: var(--text);
+  cursor: pointer; user-select: none;
+}
+.suggest-item:hover, .suggest-item.active { background: var(--chip); }
+.suggest-item mark {
+  background: var(--btn_faint); color: var(--text);
+  border-radius: 3px; padding: 0 1px;
+}
+.suggest-empty { padding: 14px; color: var(--hint); font-size: 14px; text-align: center; }
+.suggest-footer { border-top: 1px solid var(--line); background: var(--card); }
+.suggest-add {
+  display: block; width: 100%; min-height: 48px; padding: 0 14px;
+  border: 0; border-radius: 0; background: transparent;
+  color: var(--btn); text-align: left; font-size: 15px; font-weight: 600;
+}
+.suggest-add:hover, .suggest-add:active { background: var(--chip); }
+.suggest-add-inline { display: flex; align-items: center; gap: 8px; padding: 8px; }
+.suggest-add-input { flex: 1 1 auto; min-width: 0; }
+.btn-save-add { flex: 0 0 auto; width: auto; min-height: 48px; padding: 0 14px; }
+.btn-cancel-add {
+  flex: 0 0 auto; width: 48px; min-height: 48px; padding: 0;
+  background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line);
+}
+
+  .cat-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 14px 12px; border-bottom: 1px solid var(--line);
+    box-sizing: border-box; width: 100%;
+    border-radius: 0; min-height: 58px;
+  }
+  .cat-item:last-child { border-bottom: 0; }
+  .cat-item input {
+    flex: 0 0 auto; width: 20px; height: 20px; min-height: 20px; padding: 0;
+    margin-top: 2px; accent-color: var(--btn);
+  }
+  .cat-item-main { flex: 1; min-width: 0; }
+  .cat-item-title { font-size: 14.5px; font-weight: 500; cursor: pointer; }
+  .cat-item-detail { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
+
+  /* ---------- бочка ---------- */
+  .barrel-title { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
+  .barrel-card .menu-btn { background: var(--chip); margin-bottom: 0; }
+  .barrel-card .menu-btn + .menu-btn { margin-top: 8px; }
+  .menu-btn .barrel-left {
+    flex: 0 0 auto; margin-top: 0; white-space: nowrap;
+  }
+  .barrel-part { margin-bottom: 16px; }
+  .barrel-part:last-child { margin-bottom: 0; }
+  .barrel-part-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .barrel-part-title { font-weight: 600; font-size: 15px; }
+  .barrel-part-sum { font-weight: 600; font-size: 15px; white-space: nowrap; }
+  .barrel-part-sub { color: var(--hint); font-size: 12.5px; margin: 4px 0 2px; }
+
+  /* ---------- SVG бочка ---------- */
+  .barrel-visual {
+    display: flex; justify-content: center; margin: 12px 0 4px;
+  }
+  .barrel-visual svg { display: block; }
+
+  /* ---------- состояния ---------- */
+  .empty { color: var(--hint); text-align: center; padding: 34px 12px; }
+  .empty-ico { font-size: 30px; display: block; margin-bottom: 8px; }
+  .empty-title { color: var(--text); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .empty-sub { font-size: 13px; }
+  .state-error {
+    background: var(--danger_soft); border-radius: var(--radius-sm);
+    padding: 16px; text-align: center;
+  }
+  .state-error-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .state-error-text { color: var(--hint); font-size: 13px; margin-bottom: 12px; }
+  .spin {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    color: var(--hint); padding: 36px 12px; font-size: 14px;
+  }
+  .spinner {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--btn);
+    animation: spin .8s linear infinite;
+  }
+  /* Спиннер прямо в кнопке: пока идёт сохранение. */
+  .spinner.light {
+    display: inline-block; vertical-align: middle;
+    width: 16px; height: 16px; border-width: 2px;
+    border-color: rgba(255, 255, 255, .35); border-top-color: #fff;
+  }
+  button:disabled { opacity: .7; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+    * { transition-duration: .01ms !important; }
+    .car-card:active, button:active { transform: none; }
+  }
+
+  .hidden { display: none !important; }
+
+  /* ---------- поиск ---------- */
+  .search {
+    position: relative; display: flex; align-items: center; margin-bottom: 12px;
+  }
+  .search input {
+    padding-right: 46px; background: var(--field);
+  }
+  .search-clear {
+    position: absolute; right: 6px; width: 36px; height: 36px; min-height: 36px;
+    padding: 0; border-radius: 10px; background: transparent; color: var(--hint);
+    font-size: 20px; line-height: 1; display: none;
+  }
+  .search-clear.on { display: block; }
+  .search-clear:active { opacity: .6; }
+
+  /* ---------- статистика ---------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+  }
+  .stat {
+    background: var(--chip); border-radius: var(--radius-sm); padding: 10px 12px;
+    min-width: 0;
+  }
+  .stat-label { color: var(--hint); font-size: 12px; margin-bottom: 2px; }
+  .stat-value { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
+  .stat-value.small { font-size: 14px; }
+
+  /* ---------- удаление ---------- */
+  .item-del {
+    flex: 0 0 auto; width: 36px; height: 36px; min-height: 36px; padding: 0;
+    border-radius: 10px; background: var(--danger_soft); color: var(--danger);
+    font-size: 18px; line-height: 1; margin-left: 8px;
+  }
+  .btn-danger-ghost {
+    margin-top: 18px; background: var(--danger_soft); color: var(--danger);
+    border: 1px solid transparent; min-height: 48px; font-weight: 500;
+  }
+
+  /* ---------- модалка подтверждения ---------- */
+  .modal {
+    position: fixed; inset: 0; z-index: 60;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px; background: rgba(0, 0, 0, .5);
+    overscroll-behavior: contain;
+  }
+  .modal-card {
+    width: 100%; max-width: 380px; background: var(--card);
+    border-radius: var(--radius); padding: 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .4);
+  }
+  .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  .modal-text { color: var(--hint); font-size: 14px; margin-bottom: 18px; white-space: pre-line; }
+  .modal-actions { display: flex; gap: 8px; }
+  .modal-actions button { flex: 1; min-height: 48px; }
+
+  /* ---------- выбор, что скачать ---------- */
+  .picker-list {
+    display: flex; flex-direction: column; gap: 8px;
+    max-height: 52vh; overflow-y: auto; margin-bottom: 16px;
+  }
+  .picker-list button {
+    width: 100%; text-align: left; justify-content: flex-start;
+  }
+
+
+  /* ---------- тост ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(8px);
+    background: var(--card); color: var(--text); border: 1px solid var(--line);
+    padding: 12px 18px; border-radius: 14px; box-shadow: 0 6px 24px rgba(0, 0, 0, .3);
+    max-width: 88%; text-align: center; z-index: 50; opacity: 0;
+    transition: opacity .18s ease, transform .18s ease; pointer-events: none;
+    font-size: 14px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* --- Фільтри на екрані "Всі звіти" --- */
+.filters-bar { padding: 8px 0; margin: 0 0 12px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filter-label { color: var(--hint); font-size: 12px; font-weight: 500; margin-right: 4px; white-space: nowrap; }
+.filter-select { flex: 1; min-width: 120px; }
+.show-paid-row { display: flex; align-items: center; margin-top: 10px; color: var(--hint); font-size: 14px; cursor: pointer; user-select: none; }
+.report-item.is-paid .report-main { opacity: .55; }
+@media (max-width: 400px) {
+  .filter-row { flex-direction: column; gap: 4px; }
+  .filter-label { margin-bottom: 2px; }
+}
+</style>
 </head>
 <body>
-  <!-- Полоска загрузки сверху: пока идёт запрос — видно, что приложение ждёт. -->
-  <div id="loadbar" class="loadbar" aria-hidden="true"></div>
 
-  <!-- Telegram Web App header -->
-  <header class="tg-header">
-    <div class="tg-header-left">🚚 Car Tracker</div>
-    <div class="tg-header-right" id="user-badge">Загрузка…</div>
-  </header>
+<div id="loadbar" class="loadbar" aria-hidden="true"></div>
 
-  <main class="app-main" id="app-main">
-    <!-- Скелетоны при загрузке -->
-    <div class="skeleton-wrap" id="skeleton">
-      <div class="skeleton-line w-full"></div>
-      <div class="skeleton-line w-60"></div>
-      <div class="skeleton-line w-80"></div>
+<div id="screen-cars">
+  <div class="top-row">
+    <button class="btn-secondary" id="btn-main-3" onclick="openReportFromMain()">Звіт</button>
+    <button class="btn-secondary" id="btn-costs" onclick="showCosts()">
+      <span>Затраты</span><span class="costs-amount" id="costs-amount"></span>
+    </button>
+  </div>
+  <div id="barrel-box"></div>
+  <h1>Мои автомобили</h1>
+  <div class="search">
+    <input id="car-search" name="search" type="search" inputmode="search"
+           autocomplete="off" spellcheck="false" aria-label="Поиск машин"
+           placeholder="Поиск по номеру или марке" oninput="onSearchInput()">
+    <button class="search-clear" id="search-clear" type="button" aria-label="Очистить поиск"
+            onclick="clearSearch()">✕</button>
+  </div>
+  <div id="cars-list" role="status" aria-live="polite"></div>
+  <button class="btn-secondary" id="btn-main-1" onclick="showAddCar()">➕ Добавить автомобиль</button>
+  <button class="btn-secondary" id="btn-main-2" onclick="showReport()">📊 Отчёт</button>
+</div>
+
+<div id="screen-car" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад к списку</button>
+  <div class="card" id="car-head"></div>
+  <div class="card" id="car-stats" role="status" aria-live="polite"></div>
+  <h2>Добавить</h2>
+  <button class="menu-btn" onclick="showFuelForm()">
+    <span class="ico">⛽</span><span class="txt">Заправку</span><span class="arr">›</span>
+  </button>
+  <button class="menu-btn" onclick="showServiceForm()">
+    <span class="ico">🔧</span><span class="txt">Обслуживание</span><span class="arr">›</span>
+  </button>
+  <button class="menu-btn" onclick="showMileageForm()">
+    <span class="ico">📏</span><span class="txt">Пробег</span><span class="arr">›</span>
+  </button>
+  <button class="menu-btn" id="car-fill-barrel" onclick="showBarrelFillForCar()">
+    <span class="ico">🛢</span><span class="txt">Заправить из бочки</span><span class="arr">›</span>
+  </button>
+  <button class="menu-btn" onclick="showPlateForm()">
+    <span class="ico">🔤</span><span class="txt">Изменить номер</span><span class="arr">›</span>
+  </button>
+  <h2>История</h2>
+  <button class="menu-btn" onclick="showFuelHistory()">
+    <span class="ico">⛽</span><span class="txt">Заправки</span><span class="arr">›</span>
+  </button>
+  <button class="menu-btn" onclick="showServiceHistory()">
+    <span class="ico">🔧</span><span class="txt">Обслуживание</span><span class="arr">›</span>
+  </button>
+  <button class="btn-secondary" id="car-download-history"
+          onclick="downloadCarHistory()">⬇️ Скачать историю машины</button>
+  <button class="btn-danger-ghost" onclick="askDeleteCar()">🗑 Удалить машину</button>
+</div>
+
+<div id="screen-form" class="hidden">
+  <button class="back" onclick="backToCar()">← Назад</button>
+  <h1 id="form-title"></h1>
+  <div class="card">
+    <div id="form-fields"></div>
+    <div class="err" id="form-error" role="alert"></div>
+    <button class="btn-primary" style="margin-top:18px" id="form-save" onclick="saveForm()">Сохранить</button>
+  </div>
+</div>
+
+<div id="screen-history" class="hidden">
+  <button class="back" onclick="backToCar()">← Назад</button>
+  <h1 id="history-title"></h1>
+  <div class="card" id="history-body" role="status" aria-live="polite"></div>
+</div>
+
+<div id="screen-addcar" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад</button>
+  <h1>Новый автомобиль</h1>
+  <div class="card">
+    <label for="ac-model">Марка и модель</label>
+    <input id="ac-model" name="model" autocomplete="off" placeholder="например: Toyota Camry">
+    <label for="ac-plate">Госномер</label>
+    <input id="ac-plate" name="plate" autocomplete="off" maxlength="10"
+           placeholder="например: АА 1111 АА" oninput="maskPlate(this)">
+    <label for="ac-mileage">Пробег, км</label>
+    <input id="ac-mileage" name="mileage" type="number" inputmode="numeric"
+           autocomplete="off" placeholder="например: 100000">
+    <div class="err" id="ac-error" role="alert"></div>
+    <button class="btn-primary" style="margin-top:18px" id="ac-save" onclick="saveCar()">Добавить</button>
+  </div>
+</div>
+
+<div id="screen-barrel" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад к списку</button>
+  <h1 id="barrel-title">Дизель</h1>
+  <div class="barrel-visual">
+    <svg id="barrel-svg" viewBox="0 0 200 240" width="160" height="192" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="dieselGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4fc3f7"/>
+          <stop offset="100%" stop-color="#0277bd"/>
+        </linearGradient>
+        <linearGradient id="petrolGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#66bb6a"/>
+          <stop offset="100%" stop-color="#2e7d32"/>
+        </linearGradient>
+      </defs>
+      <g stroke="currentColor" stroke-width="4" fill="none">
+        <ellipse cx="100" cy="35" rx="65" ry="20"/>
+        <path d="M35 35 L35 195 Q35 215 55 215 L145 215 Q165 215 165 195 L165 35"/>
+        <ellipse cx="100" cy="195" rx="65" ry="20"/>
+      </g>
+      <g stroke="currentColor" stroke-width="3" fill="none" opacity="0.5">
+        <line x1="35" y1="80" x2="165" y2="80"/>
+        <line x1="35" y1="130" x2="165" y2="130"/>
+      </g>
+      <g id="barrel-fuel">
+        <ellipse cx="100" cy="195" rx="55" ry="16" fill="url(#dieselGrad)" opacity="0.9"/>
+        <rect x="45" y="55" width="110" height="140" fill="url(#dieselGrad)" opacity="0.9"/>
+        <ellipse cx="100" cy="55" rx="55" ry="16" fill="url(#dieselGrad)" opacity="0.9"/>
+      </g>
+      <g stroke="currentColor" stroke-width="4" fill="none">
+        <path d="M165 60 L190 60 L190 40 L210 40"/>
+      </g>
+    </svg>
+  </div>
+  <div class="card">
+    <div class="stat-value" id="barrel-balance">В бочке: —</div>
+  </div>
+  <div class="card hidden" id="barrel-fill-card">
+    <div class="barrel-part-title">⛽ Заправка машины из бочки</div>
+    <div class="hint" id="b-plate-label">Машина: —</div>
+    <label for="b-fuel-type">Топливо</label>
+    <select id="b-fuel-type">
+      <option value="diesel">Дизель</option>
+      <option value="petrol">Бензин</option>
+    </select>
+    <label for="b-liters">Сколько литров</label>
+    <input id="b-liters" name="liters" type="number" inputmode="decimal" step="0.01"
+           autocomplete="off" placeholder="например: 30…">
+    <div class="err" id="barrel-error" role="alert"></div>
+    <button class="btn-primary" id="b-fill" style="margin-top:14px"
+            onclick="saveBarrel('fill')">⛽ Завти авто</button>
+  </div>
+  <div class="card" id="barrel-amount-card">
+    <div class="barrel-part-title">🛢 Пополнение и убавление</div>
+    <label for="b-amount">Сколько литров</label>
+    <input id="b-amount" name="amount" type="number" inputmode="decimal" step="0.01"
+           autocomplete="off" placeholder="например: 50…">
+    <div class="err" id="barrel-error-amount" role="alert"></div>
+    <button class="btn-primary" id="b-add" style="margin-top:14px"
+            onclick="saveBarrel('add')">➕ Пополнение</button>
+    <button class="btn-secondary" id="b-sub" style="margin-top:8px"
+            onclick="saveBarrel('sub')">➖ Убавление</button>
+    <div class="hint">«Убавление» отнимает столько литров, сколько указано в поле. Например, ошиблись в числе — отнимите лишнее.</div>
+  </div>
+  <h2>История</h2>
+  <div class="card" id="barrel-history" role="status" aria-live="polite"></div>
+  <div class="barrel-bottom">
+    <button class="btn-secondary hidden" id="b-download-history"
+            onclick="downloadBarrelHistory()">⬇️ Скачать историю бочки</button>
+    <button class="btn-secondary danger hidden" id="b-clear-history"
+            onclick="askClearBarrel()">🗑 Очистить историю бочки</button>
+  </div>
+</div>
+
+<div id="screen-report" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад к списку</button>
+  <h1>📊 Отчёт по машинам</h1>
+  <div class="card" id="report-summary"></div>
+  <h2>Бочка</h2>
+  <div class="card" id="report-barrel"></div>
+  <div class="barrel-bottom">
+    <button class="btn-secondary" onclick="downloadReportText()">⬇️ Скачать отчёт (текст)</button>
+    <button class="btn-secondary" onclick="refreshReport()">🔄 Обновить</button>
+  </div>
+</div>
+
+<div id="screen-costs" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад к списку</button>
+  <h1>💸 Затраты за месяц</h1>
+  <div class="card" id="costs-summary"></div>
+  <h2>По машинам</h2>
+  <div class="card" id="costs-cars"></div>
+</div>
+
+<div id="screen-report-form" class="hidden">
+  <button class="back" onclick="backToReports()">← Назад</button>
+  <h1>Звіт</h1>
+  <div class="card">
+    <div id="report-form-fields"></div>
+  </div>
+</div>
+
+<div id="screen-reports-list" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад</button>
+  <h1>Всі звіти</h1>
+  <div class="filters-bar">
+    <div class="filter-row">
+      <label class="filter-label" for="filter-time">Час</label>
+      <select id="filter-time" class="filter-select">
+        <option value="7">1 тиждень</option>
+        <option value="14">2 тижні</option>
+        <option value="21">3 тижні</option>
+        <option value="30">1 місяць</option>
+        <option value="60" selected>2 місяці</option>
+      </select>
+      <label class="filter-label" for="filter-driver">Водій</label>
+      <select id="filter-driver" class="filter-select">
+        <option value="all">Всі</option>
+      </select>
     </div>
-  </main>
+    <label class="show-paid-row"><span class="paid-check"><input type="checkbox" id="filter-show-paid"></span>Показати оплачені</label>
+  </div>
+  <div id="reports-list-body" class="card" role="status" aria-live="polite"></div>
+  <div class="filters-bar" style="margin-top:12px; border-top: 1px solid var(--line); padding-top: 8px;">
+    <div class="stat">Всього: <span id="reports-count">0</span> звітів, сумарно: <span id="total-mileage">0</span> км</div>
+  </div>
+  <button class="btn-secondary" style="margin-top:12px" onclick="downloadAllReports()">⬇️ Скачати всі звіти</button>
+  <div class="hint">Оплачені звіти зникають зі списку, але лишаються в архіві й потрапляють у файл.</div>
 
-  <!-- Нижняя навигация -->
-  <nav class="bottom-nav" id="bottom-nav">
-    <a class="nav-item active" data-tab="dashboard" href="#dashboard">
-      <span class="nav-icon">📊</span>
-      <span class="nav-label">Главная</span>
-    </a>
-    <a class="nav-item" data-tab="vehicles" href="#vehicles">
-      <span class="nav-icon">🚚</span>
-      <span class="nav-label">Фуры</span>
-    </a>
-    <a class="nav-item" data-tab="expenses" href="#expenses">
-      <span class="nav-icon">💸</span>
-      <span class="nav-label">Расходы</span>
-    </a>
-    <a class="nav-item" data-tab="barrels" href="#barrels">
-      <span class="nav-icon">⛽</span>
-      <span class="nav-label">Бочки</span>
-    </a>
-    <a class="nav-item" data-tab="reports" href="#reports">
-      <span class="nav-icon">📄</span>
-      <span class="nav-label">Отчёты</span>
-    </a>
-  </nav>
+  <div id="report-drivers-list"></div>
+  <div id="report-customers-list"></div>
+</div>
 
-  <!-- MainButton от Telegram (кнопка действия) -->
-  <div id="main-button-wrap" style="display:none;"></div>
+<div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-text" id="modal-text"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn-primary" id="modal-yes" onclick="modalYes()">Удалить</button>
+    </div>
+  </div>
+</div>
 
-  <!-- Всплывающее сообщение (стили - в style.css) -->
-  <div id="flash" style="display:none;"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/js/app.js"></script>
+<script>
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+// Токен авторизации: Telegram передаёт его при открытии приложения.
+const INIT_DATA = (tg && tg.initData) || "";
+let currentCar = null;
+let currentCarPlate = "";  // госномер открытой машины (для формы правки номера)
+let formKind = "";
+let historyRequest = null; // последний запрос истории — для кнопки «Повторить»
+
+// ---------- тема Telegram ----------
+
+// Разбирает цвет Telegram: «#rrggbb», «rgb(r, g, b)» или «rgba(r, g, b, a)».
+function parseColor(value) {
+  if (!value) return null;
+  const text = String(value).trim();
+  let match = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (match) {
+    let hex = match[1];
+    if (hex.length === 3) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    return [
+      parseInt(hex.slice(0, 2), 16),
+      parseInt(hex.slice(2, 4), 16),
+      parseInt(hex.slice(4, 6), 16)
+    ];
+  }
+  match = text.match(/^rgba?\(([^)]+)\)$/i);
+  if (match) {
+    const parts = match[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    if (parts.length >= 3 && parts.slice(0, 3).every(function (n) { return !isNaN(n); })) {
+      return [parts[0], parts[1], parts[2]];
+    }
+  }
+  return null;
+}
+
+// Тот же цвет с прозрачностью.
+function withAlpha(value, alpha) {
+  const rgb = parseColor(value);
+  if (!rgb) return null;
+  return "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + "," + alpha + ")";
+}
+
+// Берёт первый непустой ключ из themeParams.
+function pick(params, names) {
+  for (let i = 0; i < names.length; i++) {
+    if (params && params[names[i]]) return params[names[i]];
+  }
+  return "";
+}
+
+// Применяет цвета темы Telegram к CSS-переменным (существующие и новые).
+function applyTheme() {
+  if (!tg) return;
+  const params = tg.themeParams || {};
+  const dark = tg.colorScheme === "dark";
+  const root = document.documentElement;
+
+  function set(name, value) {
+    if (value) root.style.setProperty(name, value);
+  }
+
+  root.classList.toggle("tg-dark", dark);
+  root.classList.toggle("tg-light", !dark);
+
+  const bg = pick(params, ["bg", "bg_color", "theme_bg_color"]);
+  const text = pick(params, ["text", "text_color", "theme_text_color"]);
+  const hint = pick(params, ["hint", "hint_color"]);
+  const secondaryBg = pick(params, ["secondary_bg_color"]);
+  const button = pick(params, ["button_color", "link", "link_color"]);
+
+  // Базовые переменные (их же задаёт Telegram).
+  set("--bg", bg);
+  set("--bg2", pick(params, ["header_bg_color"]) || secondaryBg);
+  set("--text", text);
+  set("--hint", hint);
+  set("--btn", button);
+  set("--btn_text", pick(params, ["button_text_color"]));
+  set("--card", pick(params, ["section_bg_color"]) || secondaryBg);
+  set("--field", secondaryBg || bg);
+  set("--danger", pick(params, ["destructive_text_color"]));
+
+  // Производные переменные — оттенки от цветов темы.
+  set("--text2", pick(params, ["subtitle_text_color", "secondary_hint_color"]) || hint);
+  set("--chip_text", hint);
+  set("--btn2", pick(params, ["secondary_button_color"]) || secondaryBg);
+  set("--btn2_text", pick(params, ["secondary_button_text_color"]) || text);
+  set("--line", withAlpha(text, dark ? 0.14 : 0.12));
+  set("--chip", withAlpha(text, dark ? 0.08 : 0.06));
+  set("--btn_faint", withAlpha(button, 0.25));
+  set("--danger_soft", withAlpha(pick(params, ["destructive_text_color"]), 0.14));
+  set("--shadow", "0 1px 2px " + withAlpha(text, dark ? 0.3 : 0.1));
+
+  // Цвет системной панели — чтобы приложение сливалось с окном Telegram.
+  try {
+    if (tg.setBackgroundColor && bg) tg.setBackgroundColor(bg);
+    if (tg.setHeaderColor && bg) tg.setHeaderColor(bg);
+  } catch (error) { /* старые версии клиента — не критично */ }
+
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && bg) meta.setAttribute("content", bg);
+}
+
+if (tg) {
+  applyTheme();
+  if (tg.onEvent) tg.onEvent("themeChanged", applyTheme);
+  if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+}
+
+// ---------- общие функции ----------
+
+let pendingRequests = 0;
+
+// Полоска загрузки сверху: пока идёт запрос — видно, что приложение ждёт.
+function startWait() {
+  pendingRequests += 1;
+  const bar = document.getElementById("loadbar");
+  if (bar) bar.classList.add("on");
+}
+
+function stopWait() {
+  pendingRequests = Math.max(0, pendingRequests - 1);
+  if (!pendingRequests) {
+    const bar = document.getElementById("loadbar");
+    if (bar) bar.classList.remove("on");
+  }
+}
+
+// Спиннер прямо в кнопке: человек видит, что нажатие обрабатывается.
+function setBusy(button, busy, text) {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.busyText) button.dataset.busyText = button.textContent.trim();
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner light"></span> ' + esc(text || button.dataset.busyText);
+    return;
+  }
+  button.disabled = false;
+  if (button.dataset.busyText) {
+    button.textContent = button.dataset.busyText;
+    delete button.dataset.busyText;
+  }
+}
+
+function api(path, options) {
+  const opts = Object.assign({ headers: {} }, options || {});
+  opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers);
+  if (INIT_DATA) opts.headers["X-Telegram-Init-Data"] = INIT_DATA;
+  startWait();
+  const method = String(opts.method || "GET").toUpperCase();
+  return fetch(path, opts).then(function (response) {
+    // Читаем как текст: если сервер вернул не JSON (например, страницу «не найдено»),
+    // говорим, какой именно запрос упал, а не «Unexpected token <».
+    return response.text().then(function (raw) {
+      let data = null;
+      try { data = JSON.parse(raw); } catch (error) { data = null; }
+      if (data === null || typeof data !== "object") {
+        throw new Error(method + " " + path + ": сервер повернув " + response.status +
+          " замість JSON (такого адреса на сервері немає або метод не дозволений)");
+      }
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "ошибка " + response.status);
+      }
+      return data;
+    });
+  }).finally(function () {
+    stopWait();
+  });
+}
+
+function toast(text) {
+  const box = document.getElementById("toast");
+  box.textContent = text;
+  box.classList.add("show");
+  setTimeout(function () { box.classList.remove("show"); }, 2200);
+}
+
+// ----- Общий выпадающий список (combobox): Водій, Замовник, «Що робили» -----
+// Один компонент на все три поля. Данные и правила задаёт конфиг createCombo().
+
+const comboRegistry = [];   // списки текущей формы: чистим при смене формы
+
+function disposeCombos() {
+  while (comboRegistry.length) {
+    const combo = comboRegistry.pop();
+    try { combo.destroy(); } catch (error) { /* элемента уже нет */ }
+  }
+}
+
+// HTML поля: строка ввода, кнопка ▾ и сам список. Всё внутри .combo,
+// поэтому список всегда выпадает ровно под своим полем.
+function comboHtml(id, placeholder) {
+  return '<div class="combo" id="' + id + '-combo">' +
+    '<input id="' + id + '" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ' +
+      'role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" ' +
+      'aria-controls="' + id + '-list" placeholder="' + esc(placeholder) + '">' +
+    '<button type="button" class="combo-arrow" tabindex="-1" aria-label="Показати список">▾</button>' +
+    '<div class="suggest-list" id="' + id + '-list" role="listbox"></div>' +
+  '</div>';
+}
+
+// Сравниваем без разницы между русскими и украинскими буквами: и/і/ї, е/є/э/ё, г/ґ, ы/и.
+// Замена один к одному, поэтому позиции в строке не сдвигаются (нужно для подсветки).
+const COMBO_FOLD = { "і": "и", "ї": "и", "ы": "и", "є": "е", "э": "е", "ё": "е", "ґ": "г" };
+
+function comboFold(text) {
+  return String(text).toLowerCase().replace(/[іїыєэёґ]/g, function (ch) { return COMBO_FOLD[ch]; });
+}
+
+// Где в названии совпал запрос. "word-start": только с начала слова
+// («ив» найдёт «Іванов Петро» и «Петренко Іван»), иначе — в любом месте.
+function comboMatchIndex(name, query, mode) {
+  const text = comboFold(name);
+  const q = comboFold(query);
+  let at = text.indexOf(q);
+  if (mode !== "word-start") return at;
+  while (at !== -1) {
+    if (at === 0 || /[\s\-.,'’(]/.test(text[at - 1])) return at;
+    at = text.indexOf(q, at + 1);
+  }
+  return -1;
+}
+
+// Название с подсвеченной совпавшей частью.
+function comboMark(name, at, length) {
+  if (at < 0 || !length) return esc(name);
+  return esc(name.slice(0, at)) + "<mark>" + esc(name.slice(at, at + length)) + "</mark>" +
+    esc(name.slice(at + length));
+}
+
+// Что бы ни пришло с сервера (строки или объекты) — приводим к {id, name} без дублей.
+function comboNormalize(list) {
+  const seen = {};
+  const out = [];
+  (list || []).forEach(function (raw) {
+    const isObject = raw !== null && typeof raw === "object";
+    const name = String(isObject ? raw.name : (raw == null ? "" : raw)).trim();
+    if (!name || seen[name.toLowerCase()]) return;
+    seen[name.toLowerCase()] = true;
+    out.push({ id: isObject && raw.id != null ? raw.id : null, name: name });
+  });
+  return out;
+}
+
+function comboListFrom(data, key) {
+  return Array.isArray(data) ? data : (data && data[key]) || [];
+}
+
+// Добавление на сервере: сохраняем, перечитываем список и берём запись с настоящим id.
+function comboCreateRemote(path, key, name) {
+  return api(path, { method: "POST", body: JSON.stringify({ name: name }) })
+    .then(function () { return api(path); })
+    .then(function (data) {
+      const items = comboNormalize(comboListFrom(data, key));
+      const low = name.toLowerCase();
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].name.toLowerCase() === low) return items[i];
+      }
+      return { id: null, name: name };
+    });
+}
+
+// Свои варианты «Что делали» хранятся на этом устройстве (в базе для них пока нет таблицы).
+const SERVICE_CUSTOM_KEY = "service_custom_suggestions";
+
+function loadCustomServices() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SERVICE_CUSTOM_KEY) || "[]");
+    return Array.isArray(saved) ? saved.map(String) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveCustomService(name) {
+  try {
+    const saved = loadCustomServices();
+    saved.push(name);
+    localStorage.setItem(SERVICE_CUSTOM_KEY, JSON.stringify(saved));
+  } catch (error) { /* хранилище недоступно — вариант останется до перезагрузки */ }
+}
+
+// Конфиг: id (поля), match ("word-start" | "contains"), sort, addLabel, addPlaceholder,
+// addedMessage, load() -> Promise<список>, create(name) -> Promise<{id, name}>, onPick(item).
+function createCombo(cfg) {
+  const input = document.getElementById(cfg.id);
+  const box = document.getElementById(cfg.id + "-combo");
+  const list = document.getElementById(cfg.id + "-list");
+  if (!input || !box || !list) return null;
+  const arrow = box.querySelector(".combo-arrow");
+  const mode = cfg.match || "contains";
+  const st = {
+    items: [], rows: [], open: false, active: -1,
+    adding: false, saving: false, loaded: false, failed: false, loadPromise: null
+  };
+
+  // Данные грузим один раз и держим в памяти; ошибку не запоминаем — в следующий раз пробуем снова.
+  function load(force) {
+    if (st.loadPromise && !force) return st.loadPromise;
+    st.loadPromise = Promise.resolve().then(function () { return cfg.load(); })
+      .then(function (items) {
+        st.items = comboNormalize(items);
+        if (cfg.sort) {
+          st.items.sort(function (a, b) { return a.name.localeCompare(b.name, "uk"); });
+        }
+        st.loaded = true;
+        st.failed = false;
+        return st.items;
+      })
+      .catch(function () {
+        st.loaded = true;
+        st.failed = true;
+        st.loadPromise = null;
+        return st.items;
+      });
+    return st.loadPromise;
+  }
+
+  function findExact(name) {
+    const low = String(name || "").trim().toLowerCase();
+    if (!low) return null;
+    for (let i = 0; i < st.items.length; i++) {
+      if (st.items[i].name.toLowerCase() === low) return st.items[i];
+    }
+    return null;
+  }
+
+  function currentRows() {
+    const q = input.value.trim();
+    if (!q) return st.items.map(function (item) { return { item: item, at: -1 }; });
+    const rows = [];
+    st.items.forEach(function (item) {
+      const at = comboMatchIndex(item.name, q, mode);
+      if (at >= 0) rows.push({ item: item, at: at });
+    });
+    // Совпадения с начала названия — выше остальных.
+    rows.sort(function (a, b) { return (a.at === 0 ? 0 : 1) - (b.at === 0 ? 0 : 1); });
+    return rows;
+  }
+
+  function addInput() { return list.querySelector(".suggest-add-input"); }
+
+  function render() {
+    const q = input.value.trim();
+    st.rows = currentRows();
+    if (st.active >= st.rows.length) st.active = st.rows.length - 1;
+
+    let html = '<div class="suggest-items">';
+    if (!st.rows.length) {
+      let text = "Нічого не знайдено";
+      if (!st.loaded) text = "Завантажую…";
+      else if (st.failed && !st.items.length) text = "Не вдалося завантажити список";
+      else if (!st.items.length) text = "Список порожній";
+      html += '<div class="suggest-empty">' + esc(text) + "</div>";
+    }
+    st.rows.forEach(function (row, i) {
+      const on = i === st.active;
+      html += '<div class="suggest-item' + (on ? " active" : "") + '" role="option" id="' +
+        cfg.id + "-opt-" + i + '" data-i="' + i + '" aria-selected="' + (on ? "true" : "false") + '">' +
+        comboMark(row.item.name, row.at, q.length) + "</div>";
+    });
+    html += "</div>";
+
+    html += '<div class="suggest-footer">';
+    if (st.adding) {
+      html += '<div class="suggest-add-inline">' +
+        '<input class="suggest-add-input" type="text" maxlength="80" autocomplete="off" placeholder="' +
+          esc(cfg.addPlaceholder || "Нова назва") + '">' +
+        '<button type="button" class="btn-save-add">Зберегти</button>' +
+        '<button type="button" class="btn-cancel-add" aria-label="Скасувати">✕</button>' +
+        "</div>";
+    } else {
+      const typed = q && !findExact(q);
+      html += '<button type="button" class="suggest-add">' +
+        esc(typed ? "+ Додати «" + q + "»" : cfg.addLabel) + "</button>";
+    }
+    html += "</div>";
+    list.innerHTML = html;
+
+    const field = addInput();
+    if (field) {
+      field.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") { event.preventDefault(); commit(field.value); }
+        else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); stopAdd(); }
+      });
+    }
+  }
+
+  // Подсветка пункта с клавиатуры без полной перерисовки.
+  function mark() {
+    const nodes = list.querySelectorAll(".suggest-item");
+    nodes.forEach(function (node, i) {
+      const on = i === st.active;
+      node.classList.toggle("active", on);
+      node.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) {
+        node.scrollIntoView({ block: "nearest" });
+        input.setAttribute("aria-activedescendant", node.id);
+      }
+    });
+    if (st.active < 0) input.removeAttribute("aria-activedescendant");
+  }
+
+  function open() {
+    if (st.open) return;
+    st.open = true;
+    box.classList.add("open");
+    list.classList.add("open");
+    input.setAttribute("aria-expanded", "true");
+    render();
+    load().then(function () { if (st.open && !st.adding) render(); });
+    requestAnimationFrame(function () {
+      list.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  function close() {
+    if (!st.open) return;
+    st.open = false;
+    st.adding = false;
+    st.active = -1;
+    box.classList.remove("open");
+    list.classList.remove("open");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function pick(item) {
+    input.value = item.name;
+    st.adding = false;
+    close();
+    if (cfg.onPick) cfg.onPick(item);
+    haptic();
+  }
+
+  function startAdd() {
+    st.adding = true;
+    render();
+    const field = addInput();
+    if (field) field.focus();
+  }
+
+  function stopAdd() {
+    st.adding = false;
+    render();
+  }
+
+  // Новое значение: дубль (без учёта регистра) не создаём, а выбираем уже существующее.
+  function commit(raw) {
+    const name = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!name) {
+      const field = addInput();
+      if (field) field.focus();
+      toast("Введіть назву");
+      return;
+    }
+    const dup = findExact(name);
+    if (dup) { pick(dup); return; }
+    if (st.saving) return;
+    st.saving = true;
+    Promise.resolve(cfg.create(name)).then(function (item) {
+      const known = findExact(item.name);
+      if (!known) {
+        st.items.push(item);
+        if (cfg.sort) {
+          st.items.sort(function (a, b) { return a.name.localeCompare(b.name, "uk"); });
+        }
+      }
+      pick(known || item);
+      toast(cfg.addedMessage || "Додано");
+    }).catch(function (error) {
+      toast((error && error.message) || "Не вдалося додати");
+    }).then(function () {
+      st.saving = false;
+    });
+  }
+
+  // Мышь и тач: клик по списку не должен забирать фокус у поля
+  // (кроме строки ввода нового значения — ей фокус нужен).
+  list.addEventListener("mousedown", function (event) {
+    if (!event.target.closest(".suggest-add-input")) event.preventDefault();
+  });
+
+  list.addEventListener("click", function (event) {
+    const option = event.target.closest(".suggest-item");
+    if (option) {
+      const row = st.rows[Number(option.dataset.i)];
+      if (row) pick(row.item);
+      return;
+    }
+    if (event.target.closest(".suggest-add")) {
+      const q = input.value.trim();
+      if (q && !findExact(q)) commit(q);
+      else startAdd();
+      return;
+    }
+    if (event.target.closest(".btn-save-add")) {
+      const field = addInput();
+      commit(field ? field.value : "");
+      return;
+    }
+    if (event.target.closest(".btn-cancel-add")) stopAdd();
+  });
+
+  input.addEventListener("focus", open);
+  input.addEventListener("click", open);
+  input.addEventListener("input", function () {
+    st.active = -1;
+    st.adding = false;
+    if (!st.open) open(); else render();
+  });
+  input.addEventListener("keydown", function (event) {
+    const key = event.key;
+    if (key === "ArrowDown" || key === "ArrowUp") {
+      event.preventDefault();
+      if (!st.open) { open(); return; }
+      if (!st.rows.length) return;
+      st.active += key === "ArrowDown" ? 1 : -1;
+      if (st.active >= st.rows.length) st.active = 0;
+      if (st.active < 0) st.active = st.rows.length - 1;
+      mark();
+    } else if (key === "Enter") {
+      if (!st.open) return;
+      event.preventDefault();
+      if (st.active >= 0 && st.rows[st.active]) {
+        pick(st.rows[st.active].item);
+      } else {
+        const exact = findExact(input.value);
+        if (exact) pick(exact); else close();
+      }
+    } else if (key === "Escape") {
+      if (st.open) { event.preventDefault(); event.stopPropagation(); close(); }
+    } else if (key === "Tab") {
+      close();
+    }
+  });
+
+  // Кнопка ▾ открывает и закрывает список, не вызывая клавиатуру на телефоне.
+  arrow.addEventListener("mousedown", function (event) { event.preventDefault(); });
+  arrow.addEventListener("click", function () { if (st.open) close(); else open(); });
+
+  // Клик или касание вне поля закрывает список.
+  function onOutside(event) {
+    if (st.open && !box.contains(event.target)) close();
+  }
+  document.addEventListener("pointerdown", onOutside, true);
+
+  const combo = {
+    input: input,
+    close: close,
+    reload: function () { return load(true); },
+    // Запись из списка, которая сейчас набрана в поле (или null, если такой нет).
+    resolveItem: function () {
+      return load().then(function () { return findExact(input.value); });
+    },
+    setValue: function (name) { input.value = name; close(); },
+    destroy: function () {
+      document.removeEventListener("pointerdown", onOutside, true);
+      close();
+    }
+  };
+  comboRegistry.push(combo);
+  load();   // подгружаем заранее: список готов к первому нажатию
+  return combo;
+}
+
+function haptic() {
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+}
+
+function money(value) {
+  return Number(value || 0).toLocaleString("uk-UA", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  }) + " ₴";
+}
+
+function num(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+function dateTime(value) {
+  if (!value) return "";
+  const date = new Date(String(value).replace(" ", "T"));
+  if (isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("ru-UA", {
+    day: "2-digit", month: "2-digit", year: "2-digit",
+    hour: "2-digit", minute: "2-digit"
+  });
+}
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+// Местная дата «ГГГГ-ММ-ДД» (не UTC, иначе вечером дата уедет на день).
+function localDateStr(d) {
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+
+function localTimeStr(d) {
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+}
+
+function formatDate(s) {
+  if (!s) return "—";
+  const d = new Date(String(s).replace(" ", "T"));
+  if (isNaN(d.getTime())) return String(s);
+  const pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+  return pad(d.getDate()) + "." + pad(d.getMonth() + 1) + "." + d.getFullYear() +
+    " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+function show(id) {
+  ["screen-cars", "screen-car", "screen-form", "screen-history", "screen-addcar",
+   "screen-barrel", "screen-report", "screen-report-form", "screen-reports-list",
+   "screen-costs"]
+    .forEach(function (name) {
+      document.getElementById(name).classList.add("hidden");
+    });
+  document.getElementById(id).classList.remove("hidden");
+  window.scrollTo(0, 0);
+}
+
+// Общие заготовки состояний.
+function loadingHtml(text) {
+  return '<div class="spin"><span class="spinner"></span><span>' + esc(text) + '</span></div>';
+}
+
+function emptyHtml(icon, title, sub) {
+  return '<div class="empty"><span class="empty-ico">' + icon + '</span>' +
+    '<div class="empty-title">' + esc(title) + '</div>' +
+    '<div class="empty-sub">' + esc(sub) + '</div></div>';
+}
+
+function errorHtml(title, message, action) {
+  return '<div class="state-error"><div class="state-error-title">' + esc(title) + '</div>' +
+    '<div class="state-error-text">' + esc(message) + '</div>' +
+    '<button class="btn-secondary" onclick="' + action + '">Повторить</button></div>';
+}
+
+// ---------- госномер в украинском формате АА 1111 АА ----------
+
+// Латинские буквы, похожие на кириллицу.
+// I → І и Y → У тоже нужны: иначе номер «BI1033IT» теряет буквы «I».
+const PLATE_LETTERS = {
+  "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "I": "І",
+  "K": "К", "M": "М", "O": "О", "P": "Р", "T": "Т", "X": "Х",
+  "Y": "У"
+};
+
+// Кириллические буквы украинского номера.
+const PLATE_LETTER_RE = /[А-ЯЇЄҐІЎ]/;
+const PLATE_DIGIT_RE = /[0-9]/;
+// Номер в украинском формате: 1-2 буквы, 4 цифры, 0-2 буквы.
+// Так видны и номера короче стандартных (например «АА1111А»).
+const PLATE_UK_RE = /^([А-ЯЇЄҐІЎ]{1,2})([0-9]{4})([А-ЯЇЄҐІЎ]{0,2})$/;
+
+// Приводит номер к кириллице, верхнему регистру и убирает разделители.
+function plateChars(raw) {
+  let text = String(raw == null ? "" : raw).toUpperCase();
+  text = text.replace(/[A-Z]/g, function (ch) { return PLATE_LETTERS[ch] || ch; });
+  return text.replace(/[\s\-.]/g, "");
+}
+
+// Номер для показа: «АА 1111 АА». Номера других форматов — как есть.
+// Пустые части пропускаем: у номера «АА1111А» хвоста нет, лишнего пробела быть не должно.
+function displayPlate(plate) {
+  const raw = plateChars(plate);
+  const match = PLATE_UK_RE.exec(raw);
+  if (match) return [match[1], match[2], match[3]].filter(Boolean).join(" ");
+  return raw;
+}
+
+// Живая маска ввода: две буквы, четыре цифры, две буквы.
+function maskPlate(input) {
+  if (!input) return;
+  const raw = plateChars(input.value);
+  let letters = "", digits = "";
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (PLATE_LETTER_RE.test(ch)) letters += ch;
+    else if (PLATE_DIGIT_RE.test(ch)) digits += ch;
+  }
+  let text = raw;
+  // Маску применяем только если номер похож на украинский.
+  // Старый номер (например А123ВС77) не переписываем — иначе он превратится
+  // в неудобную кашу вроде «АВ 1237 С».
+  if (letters.length >= 2 && digits.length <= 4) {
+    const prefix = letters.slice(0, 2);
+    const suffix = digits.length === 4 ? letters.slice(2, 4) : "";
+    text = prefix;
+    if (digits) text += " " + digits;
+    if (suffix) text += " " + suffix;
+  }
+  if (input.value !== text) input.value = text;
+  // Курсор в конец — так удобнее допечатывать.
+  try { input.setSelectionRange(text.length, text.length); } catch (error) { /* не текстовое поле */ }
+}
+
+// ---------- список машин ----------
+
+let searchQuery = "";      // текущий поисковый запрос
+let searchTimer = null;    // таймер: ждём, пока пользователь допечатает
+
+// Поиск с задержкой: не долбим сервер на каждую букву.
+function onSearchInput() {
+  const input = document.getElementById("car-search");
+  const clear = document.getElementById("search-clear");
+  if (clear) clear.classList.toggle("on", Boolean(input.value));
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(function () {
+    searchQuery = input.value.trim();
+    loadCars();
+  }, 300);
+}
+
+function clearSearch() {
+  const input = document.getElementById("car-search");
+  input.value = "";
+  searchQuery = "";
+  const clear = document.getElementById("search-clear");
+  if (clear) clear.classList.remove("on");
+  loadCars();
+}
+
+function loadCars() {
+  const box = document.getElementById("cars-list");
+  box.innerHTML = loadingHtml("Загружаю…");
+  // Остаток в бочке грузим после списка машин: там известно,
+  // есть ли у человека полный доступ.
+  const path = searchQuery
+    ? "/api/cars?q=" + encodeURIComponent(searchQuery)
+    : "/api/cars";
+  api(path).then(function (data) {
+    carsCache = data.cars || [];
+    isAdmin = !!data.is_admin;
+    userLevel = data.level || 0;
+    // Бочка появляется, когда известно, есть ли полный доступ.
+    loadBarrelMenu();
+    // Сумма затрат за месяц рядом с кнопкой «Затраты».
+    if (!searchQuery) loadCostsAmount();
+    if (!data.cars.length) {
+      if (searchQuery) {
+        box.innerHTML = emptyHtml("🔍", "Ничего не нашлось",
+          "По запросу «" + searchQuery + "» машин нет");
+      } else {
+        box.innerHTML = emptyHtml("🚗", "Пока нет машин", "Добавь первую — кнопка ниже");
+      }
+      return;
+    }
+    box.innerHTML = "";
+    data.cars.forEach(function (car) {
+      const card = document.createElement("div");
+      card.className = "card car-card";
+      card.innerHTML =
+        '<div class="car-row">' +
+          '<div class="car-main">' +
+            '<div class="car-title">' + esc(car.model) + '</div>' +
+            '<div class="car-sub">' + esc(displayPlate(car.plate)) + '</div>' +
+          '</div>' +
+          '<span class="car-arr">›</span>' +
+        '</div>' +
+        '<div class="chips">' +
+          '<span class="chip">' + num(car.mileage) + ' км</span>' +
+          '<span class="chip chip-accent">Потрачено: ' + money(totalSpent(car)) + '</span>' +
+          '<span class="chip">Заправок: ' + car.fuel_count + '</span>' +
+        '</div>' +
+        '<div class="car-actions">' +
+          '<button type="button" class="btn-secondary car-action" ' +
+            'onclick="event.stopPropagation(); downloadCarHistory(' + car.id + ')">' +
+            '⬇️ Скачать историю</button>' +
+          '<button type="button" class="btn-secondary car-action" ' +
+            'onclick="event.stopPropagation(); showBarrelFillForCar(' + car.id + ')">' +
+            '⛽ Из бочки</button>' +
+        '</div>';
+      card.onclick = function () { openCar(car.id); };
+      box.appendChild(card);
+    });
+  }).catch(function (error) {
+    box.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadCars()");
+  });
+}
+
+function esc(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function openCar(carId) {
+  currentCar = carId;
+  const head = document.getElementById("car-head");
+  head.innerHTML = loadingHtml("Загружаю…");
+  const statsBox = document.getElementById("car-stats");
+  statsBox.innerHTML = loadingHtml("Считаю статистику…");
+  api("/api/cars/" + carId).then(function (data) {
+    const car = data.car;
+    currentCarPlate = car.plate || "";
+    head.innerHTML =
+      '<div class="car-row">' +
+        '<div class="car-main">' +
+          '<div class="car-title">' + esc(car.model) + '</div>' +
+          '<div class="car-sub">' + esc(displayPlate(car.plate)) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chips">' +
+        '<span class="chip">' + num(car.mileage) + ' км</span>' +
+        '<span class="chip chip-accent">Потрачено: ' + money(totalSpent(car)) + '</span>' +
+        '<span class="chip">Заправок: ' + car.fuel_count + '</span>' +
+        '<span class="chip">Обслуживаний: ' + car.service_count + '</span>' +
+      '</div>' +
+      nextServiceHtml(car);
+    show("screen-car");
+    // Выгрузка — для супер-адміна (рівень 3), бочка — для повного доступу (рівень 2)
+    const downloadBtn = document.getElementById("car-download-history");
+    if (downloadBtn && data.level >= 3) downloadBtn.classList.remove("hidden");
+    const barrelBtn = document.getElementById("car-fill-barrel");
+    if (barrelBtn && data.level >= 2) barrelBtn.classList.remove("hidden");
+    loadStats(carId);
+  }).catch(function (error) {
+    head.innerHTML = errorHtml("Не удалось загрузить", error.message, "openCar(" + carId + ")");
+    statsBox.innerHTML = "";
+    show("screen-car");
+  });
+}
+
+// Добавление машины в список пользователя.
+function claimCar(carId) {
+  if (!confirm("Добавить эту машину в свой список?")) return;
+  api("/api/cars/" + carId + "/claim", {method: "POST"}).then(function (data) {
+    if (data.ok) {
+      alert(data.message || "Машина добавлена в ваш список");
+      loadCars();  // перезагрузить список машин
+    } else {
+      alert("Ошибка: " + (data.error || "неизвестная ошибка"));
+    }
+  }).catch(function (error) {
+    alert("Ошибка сети: " + error.message);
+  });
+}
+
+// Ближайшее обслуживание: по пробегу или по дате.
+function nextServiceHtml(car) {
+  const parts = [];
+  if (car.next_service_km) {
+    const left = Number(car.next_service_km) - Number(car.mileage || 0);
+    parts.push(left > 0
+      ? "через " + num(left) + " км"
+      : "пора (" + num(car.next_service_km) + " км)");
+  }
+  if (car.next_service_date) parts.push("до " + car.next_service_date);
+  if (!parts.length) return "";
+  return '<div class="chips"><span class="chip">Следующее ТО: ' +
+    esc(parts.join(" · ")) + "</span></div>";
+}
+
+// Блок статистики по заправкам.
+function loadStats(carId) {
+  const box = document.getElementById("car-stats");
+  box.innerHTML = loadingHtml("Считаю статистику…");
+  api("/api/cars/" + carId + "/stats").then(function (data) {
+    const stats = data.stats || {};
+    if (!stats.count) {
+      box.innerHTML = "";
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    const consumption = stats.avg_consumption
+      ? Number(stats.avg_consumption).toFixed(1) + " л/100км"
+      : "—";
+    const distance = stats.distance ? num(stats.distance) + " км" : "—";
+    box.innerHTML =
+      '<div class="stat-label" style="margin-bottom:8px">Статистика</div>' +
+      '<div class="stats">' +
+        '<div class="stat"><div class="stat-label">Средний расход</div>' +
+          '<div class="stat-value small">' + esc(consumption) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Пробег между заправками</div>' +
+          '<div class="stat-value small">' + esc(distance) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Заправок</div>' +
+          '<div class="stat-value">' + stats.count + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Залито литров</div>' +
+          '<div class="stat-value">' + num(Math.round(stats.total_liters || 0)) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Денег на топливо</div>' +
+          '<div class="stat-value small">' + money(stats.total_amount) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Цена за литр</div>' +
+          '<div class="stat-value small">' +
+            (stats.min_price ? money(stats.min_price) + " – " + money(stats.max_price) : "—") +
+          '</div></div>' +
+      '</div>';
+  }).catch(function () {
+    box.innerHTML = "";
+    box.classList.add("hidden");
+  });
+}
+
+function backToCars() { currentCar = null; show("screen-cars"); loadCars(); }
+function backToCar() { show("screen-car"); openCar(currentCar); }
+
+// ---------- отчёт по машинам ----------
+
+let reportData = null;
+
+// Открываем экран «Отчёт»: сводка по машинам и бочке.
+function showReport() {
+  show("screen-report");
+  loadReport();
+}
+
+function backToReports() { show("screen-cars"); }
+
+function refreshReport() {
+  loadReport();
+}
+
+function downloadReportText() {
+  if (!reportData) return;
+  const summary = reportData.report || {};
+  const cars = summary.car_summaries || [];
+  const totals = summary.totals || {};
+
+  const headerLines = [];
+  headerLines.push("ОТЧЁТ ПО ВСЕМ АВТО");
+  headerLines.push("=".repeat(60));
+  headerLines.push("Всего машин: " + (totals.car_count || 0));
+  headerLines.push("Общие расходы: " + (totals.total_expenses ? totals.total_expenses.toFixed(2) : 0) + " грн");
+  headerLines.push("Заправки: " + (totals.fuel_count || 0) + " раз(ов), " +
+    (totals.total_fuel_liters ? totals.total_fuel_liters.toFixed(1) : 0) + " л, " +
+    (totals.total_fuel_amount ? totals.total_fuel_amount.toFixed(2) : 0) + " грн");
+  headerLines.push("Обслуживание: " + (totals.total_service_count || 0) + " раз(ов), " +
+    (totals.total_services ? totals.total_services.toFixed(2) : 0) + " грн");
+  headerLines.push("");
+  headerLines.push("БОЧКА:");
+  headerLines.push("=".repeat(60));
+  Object.keys(summary.barrel_totals || {}).forEach(function (type) {
+    Object.keys(summary.barrel_totals[type]).forEach(function (action) {
+      const total = summary.barrel_totals[type][action] || 0;
+      headerLines.push(type + " " + action + ": " + total + " л");
+    });
+  });
+  headerLines.push("");
+
+  // Собираем детальные данные по каждой машине параллельно.
+  Promise.all(
+    cars.map(function (car) {
+      return Promise.all([
+        fetch("/api/cars/" + car.id + "/fuel", {
+          headers: { "X-Telegram-Init-Data": INIT_DATA }
+        }).then(function (r) { return r.json(); }),
+        fetch("/api/cars/" + car.id + "/services", {
+          headers: { "X-Telegram-Init-Data": INIT_DATA }
+        }).then(function (r) { return r.json(); })
+      ]);
+    })
+  ).then(function (results) {
+    const detailLines = [];
+    detailLines.push("ПО КАЖДОЙ МАШИНЕ:");
+    detailLines.push("=".repeat(60));
+    cars.forEach(function (car, idx) {
+      detailLines.push("Машина: " + esc(car.model) + "  номер " + esc(displayPlate(car.plate)));
+      detailLines.push("Пробег: " + num(car.mileage) + " км");
+      detailLines.push("");
+
+      const fuels = (results[idx][0] && results[idx][0].fuel) || [];
+      detailLines.push("Заправки (" + fuels.length + "):");
+      if (fuels.length) {
+        fuels.forEach(function (f) {
+          const full = Number(f.is_full) === 1 ? "полный бак" : "частично";
+          const date = esc(f.created_at || "");
+          const liters = Number(f.liters || 0).toFixed(1);
+          const price = Number(f.price || 0).toFixed(2);
+          const amount = Number(f.amount || 0).toFixed(2);
+          const odo = f.odometer != null ? num(f.odometer) : "—";
+          detailLines.push("  " + date + "  " + liters + " л по " + price + " = " + amount +
+            ", одометр " + odo + ", " + full);
+        });
+      }
+      detailLines.push("");
+
+      const services = (results[idx][1] && results[idx][1].services) || [];
+      detailLines.push("Обслуживание (" + services.length + "):");
+      if (services.length) {
+        services.forEach(function (s) {
+          const date = esc(s.created_at || "");
+          const desc = esc(s.description || "");
+          const amount = Number(s.amount || 0).toFixed(2);
+          const odo = s.odometer != null ? num(s.odometer) : "—";
+          detailLines.push("  " + date + "  " + desc + ": " + amount + ", одометр " + odo);
+        });
+      }
+      detailLines.push("");
+      detailLines.push("=".repeat(60));
+    });
+
+    const fullText = headerLines.concat(detailLines).join("\n");
+    downloadText(fullText, "otchet_all_cars.txt");
+  }).catch(function () {
+    const fallback = headerLines.push("Ошибка загрузки деталей по машинам") && headerLines.join("\n");
+    downloadText(fallback, "otchet_all_cars.txt");
+  });
+}
+
+// Выгрузка истории бочки (только уровень 3 — супер-админ).
+function exportBarrelText() {
+  fetch("/api/report?barrel=all", {
+    headers: { "X-Telegram-Init-Data": INIT_DATA }
+  }).then(function (response) {
+    if (!response.ok) throw new Error("ошибка " + response.status);
+    return response.text();
+  }).then(function (text) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "bochka.txt";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast("Файл сохранён");
+  }).catch(function () {
+    toast("Не удалось выгрузить историю бочки");
+  });
+}
+
+// Выгрузка полного отчёта бочки (только уровень 3 — супер-админ).
+function exportFullReport() {
+  fetch("/api/report?barrel=all", {
+    headers: { "X-Telegram-Init-Data": INIT_DATA }
+  }).then(function (response) {
+    if (!response.ok) throw new Error("ошибка " + response.status);
+    return response.text();
+  }).then(function (text) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "bochka.txt";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast("Файл сохранён");
+  }).catch(function () {
+    toast("Не удалось выгрузить историю бочки");
+  });
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  toast("Файл сохранён");
+}
+
+function loadReport() {
+  const box = document.getElementById("report-summary");
+  box.innerHTML = loadingHtml("Считаю отчёт…");
+  api("/api/report-summary").then(function (data) {
+    reportData = data;
+    renderReport();
+  }).catch(function (error) {
+    box.innerHTML = errorHtml("Не удалось загрузить", error.message, "refreshReport()");
+  });
+}
+
+function renderReport() {
+  const data = reportData;
+  const box = document.getElementById("report-summary");
+  const totals = (data && data.report && data.report.totals) || {};
+  const barrelTotals = (data && data.report && data.report.barrel_totals) || {};
+
+  if (!data || !data.ok) {
+    box.innerHTML = errorHtml("Не удалось загрузить", "нет данных", "refreshReport()");
+    return;
+  }
+
+  let html = '<div class="stats">';
+  html += '<div class="stat"><div class="stat-label">Машин</div><div class="stat-value">' + (totals.car_count || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Расходы</div><div class="stat-value small">' + money(totals.total_expenses || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Заправки</div><div class="stat-value">' + (totals.fuel_count || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Залито литров</div><div class="stat-value small">' + num(Math.round(totals.fuel_total_liters || 0)) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Денег на топливо</div><div class="stat-value small">' + money(totals.fuel_total_amount || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Обслуживание</div><div class="stat-value small">' + money(totals.service_total || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Всего расходов</div><div class="stat-value small">' + money((totals.total_expenses || 0) + (totals.service_total || 0)) + '</div></div>';
+  box.innerHTML = html;
+
+  // Бочка
+  const barrelBox = document.getElementById("report-barrel");
+  let barrelHtml = "";
+  const BARREL_TYPE_NAME = { diesel: "Дизель", petrol: "Бензин" };
+  const BARREL_ACTION_NAME = { add: "Пополнение", fill: "Заправка", sub: "Убавление" };
+  Object.keys(barrelTotals).forEach(function (type) {
+    Object.keys(barrelTotals[type]).forEach(function (action) {
+      const total = barrelTotals[type][action] || 0;
+      barrelHtml += '<div class="item">';
+      barrelHtml += '<div class="item-top">';
+      barrelHtml += '<span class="item-title">' + esc((BARREL_TYPE_NAME[type] || type) + ": " + (BARREL_ACTION_NAME[action] || action)) + '</span>';
+      barrelHtml += '<span class="item-sum">' + litersText(total) + ' л</span>';
+      barrelHtml += '</div>';
+      barrelHtml += '</div>';
+    });
+  });
+  barrelBox.innerHTML = barrelHtml;
+}
+
+// ---------- затраты за месяц ----------
+
+let costsData = null;          // последние загруженные итоги месяца
+
+const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+
+// Название месяца по ключу «ГГГГ-ММ».
+function monthName(monthKey) {
+  const parts = String(monthKey || "").split("-");
+  const index = Number(parts[1]) - 1;
+  if (index < 0 || index > 11) return monthKey || "";
+  return MONTH_NAMES[index] + " " + (parts[0] || "");
+}
+
+// Сумма за месяц рядом с кнопкой «Затраты».
+function renderCostsAmount() {
+  const box = document.getElementById("costs-amount");
+  if (!box) return;
+  if (!costsData) {
+    box.textContent = "";
+    return;
+  }
+  box.textContent = money((costsData.totals || {}).total || 0);
+}
+
+// Подгружаем итоги месяца для кнопки на главном экране.
+function loadCostsAmount() {
+  api("/api/month-costs").then(function (data) {
+    costsData = data.costs || null;
+    renderCostsAmount();
+  }).catch(function () {
+    // Кнопка останется без суммы — экран затрат покажет ошибку.
+  });
+}
+
+// Открываем экран «Затраты»: итоги месяца и разбивка по машинам.
+function showCosts() {
+  show("screen-costs");
+  loadCosts();
+}
+
+function loadCosts() {
+  const summary = document.getElementById("costs-summary");
+  summary.innerHTML = loadingHtml("Считаю затраты…");
+  api("/api/month-costs").then(function (data) {
+    costsData = data.costs || null;
+    renderCostsAmount();
+    renderCosts();
+  }).catch(function (error) {
+    summary.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadCosts()");
+  });
+}
+
+function renderCosts() {
+  const costs = costsData || {};
+  const totals = costs.totals || {};
+  const cars = costs.cars || [];
+
+  let html = '<div class="hint">' + esc(monthName(costs.month)) + '</div>';
+  html += '<div class="stats">';
+  html += '<div class="stat"><div class="stat-label">Расходы</div><div class="stat-value small">' + money(totals.expenses || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Заправки</div><div class="stat-value small">' + money(totals.fuel || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Обслуживание</div><div class="stat-value small">' + money(totals.services || 0) + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Всего</div><div class="stat-value small">' + money(totals.total || 0) + '</div></div>';
+  html += '</div>';
+  document.getElementById("costs-summary").innerHTML = html;
+
+  const box = document.getElementById("costs-cars");
+  if (!cars.length) {
+    box.innerHTML = emptyHtml("💸", "Пока пусто", "В этом месяце затрат ещё не было");
+    return;
+  }
+  let list = "";
+  cars.forEach(function (car) {
+    list += '<div class="item">';
+    list += '<div class="item-top">';
+    list += '<span class="item-title">' + esc(car.model) + " · " + esc(displayPlate(car.plate)) + '</span>';
+    list += '<span class="item-sum">' + money(car.total || 0) + '</span>';
+    list += '</div>';
+    list += '<div class="item-sub">Расходы: ' + money(car.expenses || 0) +
+      ' · Заправки: ' + money(car.fuel || 0) +
+      ' · Обслуживание: ' + money(car.services || 0) + '</div>';
+    list += '</div>';
+  });
+  box.innerHTML = list;
+}
+
+// ---------- огляд ----------
+
+// ---------- бочка ----------
+
+let carsCache = [];        // машины из базы: нужны для выбора в бочке
+let isAdmin = false;       // доступ администратора: видно все машины и бочка
+let userLevel = 0;         // уровень доступа пользователя (0-3)
+let barrelType = "diesel";   // выбранный вид топлива: "diesel" или "petrol"
+let barrelCar = null;        // машина, которую заправляем из бочки
+let barrelBalance = null;    // остаток в бочке по видам топлива
+let barrelItems = [];        // записи об операциях с бочкой
+
+// Число литров: без лишних нулей, с запятой — как принято в украинской записи.
+function litersText(value) {
+  const number = Number(value || 0);
+  const rounded = Math.round(number * 10) / 10;
+  return String(rounded).replace(".", ",");
+}
+
+// Остаток словами: «осталось 70 л» или «минус 5 л».
+function barrelLeftText(type) {
+  if (!barrelBalance) return "";
+  const left = Number(barrelBalance[type]);
+  if (isNaN(left)) return "";
+  if (left < 0) return "минус " + litersText(Math.abs(left)) + " л";
+  return "осталось " + litersText(left) + " л";
+}
+
+// Кусочек строки с остатком (пустой, если остаток неизвестен).
+function barrelLeftHtml(type) {
+  const text = barrelLeftText(type);
+  if (!text) return "";
+  return '<span class="hint barrel-left">' + esc(text) + '</span>';
+}
+
+// Все траты по машине: работы плюс старые записи расходников.
+function totalSpent(car) {
+  const services = Number(car.total_services || 0);
+  const expenses = Number(car.total_expenses || 0);
+  return services + expenses;
+}
+
+// Карточка «Бочка» на главном экране: два вида топлива и остаток.
+function renderBarrelMenu() {
+  // Кнопка очистки історії бочки — лише у повного доступу (рівень 2).
+  const clearBtn = document.getElementById("b-clear-history");
+  if (clearBtn) clearBtn.classList.toggle("hidden", userLevel < 2);
+  // Скачати історію — лише у супер-адміна (рівень 3).
+  const downloadBtn = document.getElementById("b-download-history");
+  if (downloadBtn) downloadBtn.classList.toggle("hidden", userLevel < 3);
+  // Кнопка «Звіт» на головному екрані — лише у супер-адміна (рівень 3).
+  const btn2 = document.getElementById("btn-main-2");
+  if (btn2) btn2.classList.toggle("hidden", userLevel < 3);
+  const box = document.getElementById("barrel-box");
+  if (!box) return;
+  // Бочка видна лише у повного доступу (рівень 2) і вище.
+  box.classList.toggle("hidden", userLevel < 2);
+  box.innerHTML =
+    '<div class="card barrel-card">' +
+      '<div class="barrel-title">🛢 Бочка</div>' +
+      '<button class="menu-btn" onclick="showBarrel(\'diesel\')">' +
+        '<span class="ico">⛽</span><span class="txt">Дизель</span>' +
+        barrelLeftHtml("diesel") + '<span class="arr">›</span></button>' +
+      '<button class="menu-btn" onclick="showBarrel(\'petrol\')">' +
+        '<span class="ico">⛽</span><span class="txt">Бензин</span>' +
+        barrelLeftHtml("petrol") + '<span class="arr">›</span></button>' +
+    '</div>';
+}
+
+// Удаление записи из истории бочки — с подтверждением.
+// Удаляет одну запись бочки и перечитывает историю.
+// Остаток в бочке — вместе со списком машин.
+function loadBarrelMenu() {
+  renderBarrelMenu();
+  // Остаток в бочке грузим только для адміністратора повного доступу (уровень 2).
+  if (userLevel < 2) {
+    barrelBalance = null;
+    renderBarrelMenu();
+    return;
+  }
+  api("/api/barrel").then(function (data) {
+    barrelBalance = data.balance || {};
+    renderBarrelMenu();
+  }).catch(function () {
+    // Остаток не показали, но пункт «Бочка» на месте.
+    barrelBalance = null;
+    renderBarrelMenu();
+  });
+}
+
+// Название вида топлива словами: «Дизель» или «Бензин».
+// Спрашиваем подтверждение и убираем выбранный вид топлива из бочки.
+// Удаляет все записи по текущему виду топлива.
+// Подпись поля номера: для дизеля номер должен быть в базе,
+// для бензина номер можно ввести любой.
+function updateBarrelPlateField() {
+  const label = document.getElementById("b-plate-label");
+  if (!label) return;
+  const car = barrelCar;
+  label.textContent = car
+    ? "Машина: " + displayPlate(car.plate) + " — " + (car.model || "")
+    : "Машина: —";
+}
+
+
+// Машины для выбора в бочке: грузим, если их ещё нет.
+function loadBarrelCars() {
+  if (carsCache.length) {
+    updateBarrelPlateField();
+    return;
+  }
+  api("/api/cars").then(function (data) {
+    carsCache = data.cars || [];
+    updateBarrelPlateField();
+  }).catch(function () {
+    carsCache = [];
+    updateBarrelPlateField();
+  });
+}
+
+// Экран бочки для выбранного вида топлива.
+function showBarrel(type) {
+  barrelType = type === "petrol" ? "petrol" : "diesel";
+  barrelCar = null;
+  document.getElementById("barrel-title").textContent =
+    barrelType === "petrol" ? "Бензин" : "Дизель";
+  document.getElementById("barrel-error").textContent = "";
+  document.getElementById("barrel-error-amount").textContent = "";
+  document.getElementById("b-liters").value = "";
+  document.getElementById("b-amount").value = "";
+  document.getElementById("barrel-fill-card").classList.add("hidden");
+  document.getElementById("barrel-amount-card").classList.remove("hidden");
+  updateBarrelPlateField();
+  show("screen-barrel");
+  loadBarrel();
+}
+
+// Заправка машины из бочки: открываем из карточки машины.
+function showBarrelFillForCar(carId) {
+  if (!carId && currentCar) carId = currentCar;
+  if (!carId) return;
+  const known = (carsCache || []).filter(function (car) {
+    return Number(car.id) === Number(carId);
+  })[0];
+  if (known) {
+    barrelCar = known;
+    openBarrelFill();
+    return;
+  }
+  api("/api/cars/" + carId).then(function (data) {
+    barrelCar = data.car || null;
+    openBarrelFill();
+  }).catch(function (error) {
+    toast(error.message);
+  });
+}
+
+function openBarrelFill() {
+  document.getElementById("barrel-error").textContent = "";
+  document.getElementById("b-liters").value = "";
+  document.getElementById("barrel-fill-card").classList.remove("hidden");
+  document.getElementById("barrel-amount-card").classList.add("hidden");
+  updateBarrelPlateField();
+  show("screen-barrel");
+  loadBarrel();
+}
+
+
+// Читаем бочку заново: остаток и история.
+function loadBarrel() {
+  const balanceBox = document.getElementById("barrel-balance");
+  const historyBox = document.getElementById("barrel-history");
+  balanceBox.textContent = "В бочке: …";
+  historyBox.innerHTML = loadingHtml("Загружаю…");
+  return api("/api/barrel").then(function (data) {
+    barrelBalance = data.balance || {};
+    barrelItems = data.items || [];
+    renderBarrel();
+    renderBarrelMenu();
+    return data;
+  }).catch(function (error) {
+    balanceBox.textContent = "В бочке: —";
+    historyBox.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadBarrel()");
+    throw error;
+  });
+}
+
+function renderBarrel() {
+  const balanceBox = document.getElementById("barrel-balance");
+  const left = barrelBalance ? Number(barrelBalance[barrelType]) : NaN;
+  if (isNaN(left)) {
+    balanceBox.textContent = "В бочке: —";
+  } else if (left < 0) {
+    balanceBox.textContent = "В бочке: минус " + litersText(Math.abs(left)) + " л";
+  } else {
+    balanceBox.textContent = "В бочке: " + litersText(left) + " л";
+  }
+  renderBarrelVisual();
+  renderBarrelHistory();
+}
+
+// ---------- SVG бочка ----------
+
+// Вместимость бочки в общем (литров, все виды топлива вместе).
+const BARREL_CAPACITY = 30_000;
+
+// Рисует уровень топлива внутри SVG-бочки.
+// Нужно чтобы человек видел, сколько осталось, не читая текст.
+function renderBarrelVisual() {
+  const fuel = document.getElementById("barrel-fuel");
+  if (!fuel) return;
+
+  const type = barrelType;
+  const balance = barrelBalance ? Number(barrelBalance[type]) : 0;
+  const capacity = BARREL_CAPACITY;
+  const ratio = Math.max(0, Math.min(1, balance / capacity));
+
+  const fuelHeight = Math.round(ratio * 140);
+  const fuelY = 195 - fuelHeight;
+  const gradientId = type === "petrol" ? "petrolGrad" : "dieselGrad";
+
+  fuel.innerHTML =
+    '<ellipse cx="100" cy="195" rx="55" ry="16" fill="url(#' + gradientId + ')" opacity="0.9"/>' +
+    '<rect x="45" y="' + fuelY + '" width="110" height="' + (195 - fuelY) + '" fill="url(#' + gradientId + ')" opacity="0.9"/>' +
+    '<ellipse cx="100" cy="' + fuelY + '" rx="55" ry="16" fill="url(#' + gradientId + ')" opacity="0.9"/>';
+}
+
+// История только по выбранному виду топлива.
+// Сверху — заправки (сколько залили в машину), ниже — сколько долили в бочку.
+function renderBarrelHistory() {
+  const box = document.getElementById("barrel-history");
+  if (!box) return;
+  const items = barrelItems.filter(function (item) {
+    return item.fuel_type === barrelType;
+  });
+  if (!items.length) {
+    box.innerHTML = emptyHtml("🛢", "Пока пусто", "Записей по этому виду топлива ещё нет");
+    return;
+  }
+  const fills = items.filter(function (item) { return item.action === "fill"; });
+  const adds = items.filter(function (item) { return item.action === "add"; });
+  const subs = items.filter(function (item) { return item.action === "sub"; });
+  box.innerHTML = "";
+  if (fills.length) {
+    box.appendChild(barrelHistoryPart("Заправки", "сколько залито в машину", fills, true));
+  }
+  if (adds.length) {
+    box.appendChild(barrelHistoryPart("Пополнение", "сколько долили в бочку", adds, false));
+  }
+  if (subs.length) {
+    box.appendChild(barrelHistoryPart("Убавление", "сколько отняли из бочки", subs, false));
+  }
+}
+
+// Одна часть истории бочки: заголовок с итогом и список записей.
+function barrelHistoryPart(title, subtitle, items, showPlate) {
+  const part = document.createElement("div");
+  part.className = "barrel-part";
+  const total = items.reduce(function (sum, item) {
+    return sum + Number(item.liters || 0);
+  }, 0);
+  part.innerHTML =
+    '<div class="barrel-part-head">' +
+      '<span class="barrel-part-title">' + esc(title) + '</span>' +
+      '<span class="barrel-part-sum">' + litersText(total) + ' л</span>' +
+    '</div>' +
+    '<div class="barrel-part-sub">' + esc(subtitle) + '</div>';
+  items.forEach(function (item) {
+    const row = document.createElement("div");
+    row.className = "item";
+    const name = showPlate && item.plate ? esc(item.plate) : "бочка";
+    row.innerHTML =
+      '<div class="item-top"><span class="item-title">' + name + " — " +
+        litersText(item.liters) + ' л</span></div>' +
+      '<div class="item-sub">' + esc(dateTime(item.created_at)) + '</div>';
+    part.appendChild(row);
+  });
+  return part;
+}
+
+// Запись в бочку: заправить машину или долить топливо.
+function saveBarrel(action) {
+  const isFill = action === "fill";
+  const errorBox = document.getElementById(
+    isFill ? "barrel-error" : "barrel-error-amount");
+  errorBox.textContent = "";
+  const litersField = isFill ? "b-liters" : "b-amount";
+  const rawLiters = value(litersField);
+  const liters = Number(rawLiters);
+  if (!rawLiters || isNaN(liters) || liters <= 0) {
+    errorBox.textContent = "Укажите, сколько литров";
+    return;
+  }
+  const body = { fuel_type: barrelType, action: action, liters: liters };
+  if (isFill) {
+    if (!barrelCar) {
+      errorBox.textContent = "Не выбрана машина";
+      return;
+    }
+    const typeSelect = document.getElementById("b-fuel-type");
+    if (typeSelect) body.fuel_type = typeSelect.value;
+    body.plate = barrelCar.plate;
+  }
+  const fillButton = document.getElementById("b-fill");
+  const addButton = document.getElementById("b-add");
+  const subButton = document.getElementById("b-sub");
+  const busyButton = isFill ? fillButton : (action === "add" ? addButton : subButton);
+  setBusy(busyButton, true, "Сохраняю…");
+  if (fillButton && fillButton !== busyButton) fillButton.disabled = true;
+  if (addButton && addButton !== busyButton) addButton.disabled = true;
+  if (subButton && subButton !== busyButton) subButton.disabled = true;
+  api("/api/barrel", { method: "POST", body: JSON.stringify(body) })
+    .then(function (data) {
+      haptic();
+      toast(data.message || "Записано");
+      document.getElementById(litersField).value = "";
+      loadBarrel().then(function () {
+        // Если остаток ушёл в минус — сразу же говорим об этом.
+        Object.keys(barrelBalance).forEach(function (type) {
+          const left = Number(barrelBalance[type]);
+          if (left < 0) {
+            toast("Бочка " + type + " ушла в минус: " + litersText(Math.abs(left)) + " л");
+          }
+        });
+        // После заправки из бочки — обратно на страницу машины:
+        // пользователь сразу может выбрать, что дальше делать.
+        if (action === "fill") {
+          if (currentCar) {
+            openCar(currentCar);
+          } else {
+            backToCars();
+          }
+        }
+      });
+    })
+    .catch(function (error) {
+      errorBox.textContent = error.message;
+    })
+    .finally(function () {
+      setBusy(busyButton, false);
+      if (fillButton) fillButton.disabled = false;
+      if (addButton) addButton.disabled = false;
+      if (subButton) subButton.disabled = false;
+    });
+}
+
+
+// ---------- автокомплит для поля «Что делали» ----------
+
+// Состояние выпадающего списка: открыт/закрыт, пункты и текущий выбор.
+let autocompleteOpen = false;   // список подсказок открыт?
+let autocompleteItems = [];     // варианты, показанные в списке
+let autocompleteIndex = -1;     // выбранный с клавиатуры вариант
+
+// ---------- каталог работ и расходников ----------
+
+let catalogGroup = "service";   // группа каталога: "service"
+let catalogItems = null;        // кэш каталога с сервера
+let catalogDescAuto = "";       // текст, который мы подставили в «Что сделать»
+let suggestionVisible = false;  // выпадающий список подсказок открыт?
+
+// Типичные названия сервисов — подсказки для поля «Что делали».
+// Добавляй свои варианты сюда — они появятся в выпадающем списке.
+const SERVICE_SUGGESTIONS = [
+  "Замена масла",
+  "Замена масляного фильтра",
+  "Замена воздушного фильтра",
+  "Замена топливного фильтра",
+  "Замена свечей зажигания",
+  "Замена тормозных колодок",
+  "Замена тормозных дисков",
+  "Замена амортизаторов",
+  "Замена рулевых тяг",
+  "Замена приводного ремня",
+  "Замена цепи ГРМ",
+  "Замена ремня ГРМ",
+  "Замена жидкости в коробке",
+  "Замена антифриза",
+  "Замена тормозной жидкости",
+  "Диагностика",
+  "Регулировка клапанов",
+  "Шиномонтаж",
+  "Мойка",
+  "Химчистка салона",
+];
+
+// Підказки для поля «Замовник» у звітах.
+const CLIENT_SUGGESTIONS = [
+  "Клієнт 1",
+  "Клієнт 2",
+  "Клієнт 3",
+  "Клієнт 4",
+  "Клієнт 5",
+  "Підприємство А",
+  "Підприємство Б",
+  "ТОВ Рома",
+  "ФОП Іванов",
+];
+
+// Підказки для поля «Водій» у звітах.
+const DRIVER_SUGGESTIONS = [
+  "Водій 1",
+  "Водій 2",
+  "Водій 3",
+  "Водій 4",
+  "Водій 5",
+  "Іван Петренко",
+  "Петро Іванов",
+  "Олексій Ковальчук",
+  "Микола Шевчук",
+];
+
+// Простое экранирование для JS-строк (одинарные кавычки, обратные слеши).
+function escJs(text) {
+  return String(text == null ? "" : text)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'");
+}
+
+// Блок каталога: только загрузка списка.
+function catalogHtml() {
+  return '<div id="catalog-box" class="hidden">' +
+    '<input id="cat-search" placeholder="Поиск по списку…" oninput="filterCatalog()">' +
+    '<div id="catalog-list" class="cat-list"></div>' +
+    '</div>';
+}
+
+// Новая форма — чистая структура.
+function resetCatalog() {
+  catalogDescAuto = "";
+  suggestionVisible = false;
+  const box = document.getElementById("catalog-box");
+  if (box) box.classList.add("hidden");
+  const list = document.getElementById("catalog-list");
+  if (list) list.innerHTML = "";
+}
+
+// Галочка «Показать список работ»: открываем и подгружаем каталог.
+function toggleCatalog() {
+  const box = document.getElementById("catalog-box");
+  if (!box) return;
+  if (box.classList.contains("hidden")) {
+    box.classList.remove("hidden");
+    loadCatalog();
+  } else {
+    box.classList.add("hidden");
+  }
+}
+
+// Каталог грузим один раз и держим в памяти.
+function loadCatalog() {
+  const list = document.getElementById("catalog-list");
+  if (!list) return;
+  if (catalogItems) {
+    renderCatalogList();
+    return;
+  }
+  list.innerHTML = loadingHtml("Загружаю список…");
+  api("/api/catalog").then(function (data) {
+    catalogItems = data.items || [];
+    renderCatalogList();
+  }).catch(function (error) {
+    list.innerHTML = errorHtml("Не удалось загрузить список", error.message, "loadCatalog()");
+  });
+}
+
+// Поиск по каталогу: смотрим и в названии, и в описании.
+function filterCatalog() {
+  renderCatalogList(value("cat-search"));
+}
+
+// Пункт каталога по id.
+function catalogItemById(id) {
+  const items = catalogItems || [];
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].id === id) return items[i];
+  }
+  return null;
+}
+
+// Список пунктов своей группы, отфильтрованный поиском.
+function renderCatalogList(query) {
+  const list = document.getElementById("catalog-list");
+  if (!list) return;
+  if (query === undefined) query = value("cat-search");
+  const text = String(query || "").toLowerCase();
+  const items = (catalogItems || []).filter(function (item) {
+    if (item.group !== catalogGroup) return false;
+    if (!text) return true;
+    return String(item.title || "").toLowerCase().indexOf(text) >= 0 ||
+      String(item.detail || "").toLowerCase().indexOf(text) >= 0;
+  });
+  if (!items.length) {
+    list.innerHTML = '<div class="hint">Ничего не нашлось</div>';
+    return;
+  }
+  list.innerHTML = "";
+  items.forEach(function (item) {
+    const row = document.createElement("div");
+    row.className = "cat-item";
+    const main = document.createElement("div");
+    main.className = "cat-item-main";
+    const title = document.createElement("div");
+    title.className = "cat-item-title";
+    title.textContent = item.title;
+    title.onclick = function () {
+      pickCatalogItem(item.title);
+      haptic();
+    };
+    main.appendChild(title);
+    if (item.detail) {
+      const detail = document.createElement("div");
+      detail.className = "cat-item-detail";
+      detail.textContent = item.detail;
+      main.appendChild(detail);
+    }
+    row.appendChild(main);
+    list.appendChild(row);
+  });
+}
+
+// Выбрать пункт каталога: вписать название в «Что сделали».
+function pickCatalogItem(title) {
+  const descField = document.getElementById("f-description");
+  if (!descField) return;
+  catalogDescAuto = title;
+  descField.value = title;
+  if (window.comboService) window.comboService.setValue(title);
+}
+
+// Подсказки (автокомплит) для поля «Что делали».
+// При клике/фокусе в пустом поле показываются популярные варианты.
+// При вводе текст фильтрует список в реальном времени.
+
+// Подсвечивает совпавшую часть текста.
+function highlight(text, query) {
+  if (!query) return esc(text);
+  const lower = String(text).toLowerCase();
+  const q = String(query).toLowerCase();
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) {
+      result += esc(String(text).slice(i));
+      break;
+    }
+    result += esc(String(text).slice(i, idx));
+    result += '<mark>' + esc(String(text).slice(idx, idx + q.length)) + '</mark>';
+    i = idx + q.length;
+  }
+  return result;
+}
+
+// ---------- форма звіта ----------
+
+// ---------- форма звіта ----------
+// ----- Календар в стилі сайту (замість системного, який не стилізується) -----
+const CAL_MONTHS = ["Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
+  "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"];
+const CAL_DOW = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
+
+function parseIsoDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+// Значення зберігається в прихованому полі #id як «ГГГГ-ММ-ДД»; на екрані — «ДД.ММ.ГГГГ».
+function initDateField(id) {
+  const hidden = document.getElementById(id);
+  const box = document.getElementById(id + "-field");
+  const view = document.getElementById(id + "-view");
+  const pop = document.getElementById(id + "-cal");
+  if (!hidden || !box || !view || !pop) return null;
+  const btn = box.querySelector(".datefield-btn");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = localDateStr(today);
+  const todayIndex = today.getFullYear() * 12 + today.getMonth();
+  let shown = new Date(today.getFullYear(), today.getMonth(), 1);
+  let isOpen = false;
+
+  function sync() {
+    const d = parseIsoDate(hidden.value);
+    view.value = d ? pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear() : "";
+  }
+
+  function render() {
+    const y = shown.getFullYear();
+    const m = shown.getMonth();
+    const lead = (new Date(y, m, 1).getDay() + 6) % 7;   // понеділок — перший
+    const total = new Date(y, m + 1, 0).getDate();
+    const atLimit = y * 12 + m >= todayIndex;
+    let html = '<div class="cal-head">' +
+      '<button type="button" class="cal-nav" data-nav="-1" aria-label="Попередній місяць">‹</button>' +
+      '<div class="cal-title">' + CAL_MONTHS[m] + " " + y + "</div>" +
+      '<button type="button" class="cal-nav" data-nav="1" aria-label="Наступний місяць"' +
+        (atLimit ? " disabled" : "") + ">›</button></div>" +
+      '<div class="cal-grid">';
+    CAL_DOW.forEach(function (name) { html += '<div class="cal-dow">' + name + "</div>"; });
+    for (let i = 0; i < lead; i++) html += "<span></span>";
+    for (let day = 1; day <= total; day++) {
+      const iso = y + "-" + pad2(m + 1) + "-" + pad2(day);
+      let cls = "cal-day";
+      if (iso === todayIso) cls += " today";
+      if (iso === hidden.value) cls += " sel";
+      html += '<button type="button" class="' + cls + '" data-iso="' + iso + '"' +
+        (iso > todayIso ? " disabled" : "") + ">" + day + "</button>";
+    }
+    pop.innerHTML = html + "</div>";
+  }
+
+  function open() {
+    if (isOpen) return;
+    const d = parseIsoDate(hidden.value) || today;
+    shown = new Date(d.getFullYear(), d.getMonth(), 1);
+    render();
+    isOpen = true;
+    box.classList.add("open");
+    pop.classList.add("open");
+    view.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(function () {
+      pop.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  function close() {
+    if (!isOpen) return;
+    isOpen = false;
+    box.classList.remove("open");
+    pop.classList.remove("open");
+    view.setAttribute("aria-expanded", "false");
+  }
+
+  function toggle() { if (isOpen) close(); else open(); }
+
+  pop.addEventListener("mousedown", function (event) { event.preventDefault(); });
+  pop.addEventListener("click", function (event) {
+    const nav = event.target.closest(".cal-nav");
+    if (nav) {
+      if (nav.disabled) return;
+      shown = new Date(shown.getFullYear(), shown.getMonth() + Number(nav.dataset.nav), 1);
+      render();
+      return;
+    }
+    const day = event.target.closest(".cal-day");
+    if (day && !day.disabled) {
+      hidden.value = day.dataset.iso;
+      sync();
+      close();
+      haptic();
+    }
+  });
+  view.addEventListener("click", toggle);
+  view.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+      event.preventDefault();
+      open();
+    } else if (event.key === "Escape" && isOpen) {
+      event.preventDefault();
+      close();
+    }
+  });
+  btn.addEventListener("mousedown", function (event) { event.preventDefault(); });
+  btn.addEventListener("click", toggle);
+
+  function onOutside(event) {
+    if (isOpen && !box.contains(event.target) && !pop.contains(event.target)) close();
+  }
+  document.addEventListener("pointerdown", onOutside, true);
+
+  sync();
+  comboRegistry.push({
+    destroy: function () {
+      document.removeEventListener("pointerdown", onOutside, true);
+      close();
+    }
+  });
+  return { close: close };
+}
+
+function showReportForm(carId) {
+  currentCar = carId;
+  disposeCombos();
+  document.getElementById("report-form-fields").innerHTML =
+    '<div class="combo-row">' +
+      '<label for="report-driver-input">Водій</label>' +
+      comboHtml("report-driver-input", "Виберіть або додайте водія") +
+    '</div>' +
+    '<div class="combo-row">' +
+      '<label for="report-client-input">Замовник</label>' +
+      comboHtml("report-client-input", "Виберіть або додайте замовника") +
+    '</div>' +
+    '<div class="combo-row">' +
+      '<label for="report-mileage-input">Кілометраж</label>' +
+      '<input id="report-mileage-input" name="mileage" type="number" inputmode="numeric" ' +
+        'autocomplete="off" placeholder="наприклад: 121800">' +
+    '</div>' +
+    '<div class="combo-row">' +
+      '<label for="report-date-input-view">Дата звіту</label>' +
+      '<div class="datefield" id="report-date-input-field">' +
+        '<input type="hidden" id="report-date-input" value="' + localDateStr(new Date()) + '">' +
+        '<input type="text" id="report-date-input-view" readonly autocomplete="off" ' +
+          'role="combobox" aria-haspopup="dialog" aria-expanded="false" placeholder="Оберіть дату">' +
+        '<button type="button" class="datefield-btn" tabindex="-1" aria-label="Відкрити календар">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+          'stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>' +
+          '<path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+      '</div>' +
+      '<div class="cal" id="report-date-input-cal" role="dialog" aria-label="Календар"></div>' +
+    '</div>' +
+    '<div class="err" id="report-form-error" role="alert"></div>' +
+    '<button class="btn-primary" id="report-save" style="margin-top:18px" ' +
+      'onclick="saveReport()">Добавить звіт</button>' +
+    '<button class="btn-secondary" style="margin-top:8px" onclick="showAllReports()">Всі звіти</button>';
+  show("screen-report-form");
+  initDateField("report-date-input");
+
+  window.comboDriver = createCombo({
+    id: "report-driver-input",
+    match: "word-start",
+    sort: true,
+    addLabel: "+ Додати водія",
+    addPlaceholder: "Прізвище та ім’я водія",
+    addedMessage: "Водія додано",
+    load: function () {
+      return api("/api/drivers").then(function (data) { return comboListFrom(data, "drivers"); });
+    },
+    create: function (name) { return comboCreateRemote("/api/drivers", "drivers", name); }
+  });
+
+  window.comboCustomer = createCombo({
+    id: "report-client-input",
+    match: "contains",
+    sort: true,
+    addLabel: "+ Додати замовника",
+    addPlaceholder: "Назва замовника",
+    addedMessage: "Замовника додано",
+    load: function () {
+      return api("/api/customers").then(function (data) { return comboListFrom(data, "customers"); });
+    },
+    create: function (name) { return comboCreateRemote("/api/customers", "customers", name); }
+  });
+}
+
+function saveReport() {
+  const mileage = Number(document.getElementById("report-mileage-input").value);
+  const driverText = document.getElementById("report-driver-input").value.trim();
+  const clientText = document.getElementById("report-client-input").value.trim();
+  const dateVal = (document.getElementById("report-date-input").value || "").trim();
+
+  if (!driverText) { showError("Введіть водія"); return; }
+  if (!clientText) { showError("Введіть замовника"); return; }
+  if (isNaN(mileage) || mileage <= 0) { showError("Кілометраж має бути більше 0"); return; }
+  if (!dateVal) { showError("Вкажіть дату звіту"); return; }
+  if (dateVal > localDateStr(new Date())) { showError("Дата не може бути в майбутньому"); return; }
+
+  const button = document.getElementById("report-save");
+  setBusy(button, true, "Зберігаю…");
+  Promise.all([window.comboDriver.resolveItem(), window.comboCustomer.resolveItem()])
+    .then(function (found) {
+      const driver = found[0];
+      const client = found[1];
+      if (!driver) {
+        showError("Водія немає в списку: оберіть його або натисніть «+ Додати водія»");
+        return null;
+      }
+      if (!client) {
+        showError("Замовника немає в списку: оберіть його або натисніть «+ Додати замовника»");
+        return null;
+      }
+      // Бэкенд хранит имена (driver, customer). Остальные ключи (client, *_id) — про запас,
+      // на случай если на сервере поля названы иначе.
+      return api("/api/reports", { method: "POST", body: JSON.stringify({
+        driver: driver.name,
+        customer: client.name,
+        client: client.name,
+        mileage: mileage,
+        date: dateVal,
+        created_at: dateVal + " " + localTimeStr(new Date()),
+        driver_id: driver.id,
+        customer_id: client.id,
+        client_id: client.id
+      }) }).then(function (data) {
+        toast(data.message || "Звіт додано");
+        hideReportForm();
+        showAllReports();
+      });
+    })
+    .catch(function (error) {
+      showError(error.message || "Помилка при збереженні");
+    })
+    .then(function () {
+      setBusy(button, false);
+    });
+}
+
+// Водії та замовники для екрана «Всі звіти».
+let reportDrivers = [];
+let reportCustomers = [];
+
+function loadReportDrivers() {
+  return api("/api/drivers").then(function (data) {
+    reportDrivers = comboNormalize(comboListFrom(data, "drivers"));
+  }).catch(function () {
+    reportDrivers = [];
+  });
+}
+
+function loadReportCustomers() {
+  return api("/api/customers").then(function (data) {
+    reportCustomers = comboNormalize(comboListFrom(data, "customers"));
+  }).catch(function () {
+    reportCustomers = [];
+  });
+}
+
+function askDeleteDriver(driverId) {
+  const found = reportDrivers.filter(function (d) { return Number(d.id) === Number(driverId); })[0];
+  const name = found ? found.name : "";
+  openModal("Видалити водія?",
+    "Ви дійсно хочете видалити водія «" + name + "»?",
+    function () { deleteDriver(driverId, name); },
+    "Видалити"
+  );
+}
+
+function askDeleteCustomer(customerId) {
+  const found = reportCustomers.filter(function (d) { return Number(d.id) === Number(customerId); })[0];
+  const name = found ? found.name : "";
+  openModal("Видалити замовника?",
+    "Ви дійсно хочете видалити замовника «" + name + "»?",
+    function () { deleteCustomer(customerId, name); },
+    "Видалити"
+  );
+}
+
+function deleteDriver(driverId, driverName) {
+  api("/api/drivers/" + driverId, { method: "DELETE" })
+    .then(function (data) {
+      haptic();
+      toast(data.message || "Водія видалено");
+      showAllReports();
+    })
+    .catch(function (error) {
+      toast("Не вдалося видалити: " + error.message);
+    });
+}
+
+function deleteCustomer(customerId, customerName) {
+  api("/api/customers/" + customerId, { method: "DELETE" })
+    .then(function (data) {
+      haptic();
+      toast(data.message || "Замовника видалено");
+      showAllReports();
+    })
+    .catch(function (error) {
+      toast("Не вдалося видалити: " + error.message);
+    });
+}
+
+// Звіти з сервера лежать тут: фільтри працюють по ним без нового запиту.
+let reportsCache = [];
+
+// Список водіїв у фільтрі. Вибраний водій НЕ скидається; якщо його видалили — «Всі».
+function fillDriverFilter() {
+  const select = document.getElementById("filter-driver");
+  if (!select) return;
+  const keep = select.value || "all";
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "all";
+  all.textContent = "Всі";
+  select.appendChild(all);
+  reportDrivers.forEach(function (d) {
+    const opt = document.createElement("option");
+    opt.value = d.name;
+    opt.textContent = d.name;
+    select.appendChild(opt);
+  });
+  const stillThere = reportDrivers.some(function (d) { return d.name === keep; });
+  select.value = stillThere ? keep : "all";
+}
+
+function reportStamp(report) {
+  const time = new Date(String(report.created_at || "").replace(" ", "T")).getTime();
+  return isNaN(time) ? 0 : time;
+}
+
+function showAllReports() {
+  return api("/api/reports").then(function (data) {
+    reportsCache = data.reports || [];
+    return Promise.all([loadReportDrivers(), loadReportCustomers()]);
+  }).then(function () {
+    fillDriverFilter();
+    renderReportsList();
+    renderDriversList();
+    renderCustomersList();
+    show("screen-reports-list");
+  }).catch(function (error) {
+    toast("Помилка завантаження звітів: " + ((error && error.message) || ""));
+  });
+}
+
+// Фільтри: час (у днях), водій, «Показати оплачені». Оплачені за замовчуванням сховані.
+function renderReportsList() {
+  const days = parseInt(document.getElementById("filter-time").value, 10) || 60;
+  const driverVal = document.getElementById("filter-driver").value || "all";
+  const showPaid = document.getElementById("filter-show-paid").checked;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  let paidHidden = 0;
+  const filtered = reportsCache.filter(function (r) {
+    if (reportStamp(r) < cutoff) return false;
+    if (driverVal !== "all" && String(r.driver || "").toLowerCase() !== driverVal.toLowerCase()) return false;
+    if (Number(r.paid) && !showPaid) { paidHidden++; return false; }
+    return true;
+  }).sort(function (a, b) {
+    return (reportStamp(b) - reportStamp(a)) || (Number(b.id) - Number(a.id));
+  });
+
+  let listHTML = "";
+  if (!filtered.length) {
+    const sub = paidHidden
+      ? "Оплачені звіти (" + paidHidden + ") сховані: вони в архіві, їх можна скачати кнопкою нижче"
+      : "За поточні фільтри нічого немає";
+    listHTML = '<div class="empty"><span class="empty-ico">📋</span>' +
+      '<div class="empty-title">Звітів немає</div>' +
+      '<div class="empty-sub">' + esc(sub) + '</div></div>';
+  } else {
+    filtered.forEach(function (report) {
+      const paid = Number(report.paid) ? true : false;
+      const customer = report.customer || report.client || "";
+      const title = report.driver || customer;
+      const customerShown = report.driver ? customer : "";
+      const meta = (customerShown ? esc(customerShown) + " · " : "") +
+        esc(formatDate(report.created_at || "")) + " · " + esc(Number(report.mileage) || 0) + " км";
+      listHTML +=
+        '<div class="report-item' + (paid ? " is-paid" : "") + '">' +
+          '<div class="report-item-top">' +
+            '<div class="report-main">' +
+              '<div class="report-driver">' + esc(title) + '</div>' +
+              '<div class="report-meta">' + meta + '</div>' +
+            '</div>' +
+            '<label class="paid-check" style="width:44px;height:44px;margin:0" title="Оплачено">' +
+              '<input type="checkbox" aria-label="Оплачено"' + (paid ? " checked" : "") +
+                ' onchange="toggleReportPaid(' + Number(report.id) + ', this.checked ? 1 : 0)">' +
+            '</label>' +
+            (paid
+              ? '<button type="button" class="item-del" onclick="askDeleteReport(' + Number(report.id) + ')" ' +
+                'aria-label="Видалити звіт">✕</button>'
+              : '') +
+          '</div>' +
+        '</div>';
+    });
+  }
+  document.getElementById("reports-list-body").innerHTML = listHTML;
+
+  let total = 0;
+  filtered.forEach(function (r) { total += Number(r.mileage || 0); });
+  document.getElementById("reports-count").textContent = filtered.length;
+  document.getElementById("total-mileage").textContent = total;
+}
+
+function renderDriversList() {
+  const box = document.getElementById("report-drivers-list");
+  if (!box) return;
+  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Водії</h3>';
+  if (!reportDrivers.length) {
+    html += '<div class="empty" style="padding:16px"><div class="empty-ico">👤</div>' +
+      '<div class="empty-title">Водіїв немає</div>' +
+      '<div class="empty-sub">Додайте водія в формі звіту</div></div>';
+  } else {
+    html += '<div style="display:flex; flex-direction:column; gap:8px">';
+    reportDrivers.forEach(function (d) {
+      const canDelete = d.id != null && isFinite(Number(d.id));
+      html += '<div class="report-item">' +
+        '<div class="item-top" style="justify-content:space-between; align-items:center">' +
+        '<span class="item-title">' + esc(d.name) + '</span>' +
+        (canDelete
+          ? '<button type="button" class="item-del" onclick="askDeleteDriver(' + Number(d.id) + ')" ' +
+            'aria-label="Видалити водія">✕</button>'
+          : '') +
+        '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  box.innerHTML = html;
+}
+
+function renderCustomersList() {
+  const box = document.getElementById("report-customers-list");
+  if (!box) return;
+  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Замовники</h3>';
+  if (!reportCustomers.length) {
+    html += '<div class="empty" style="padding:16px"><div class="empty-ico">🏢</div>' +
+      '<div class="empty-title">Замовників немає</div>' +
+      '<div class="empty-sub">Додайте замовника в формі звіту</div></div>';
+  } else {
+    html += '<div style="display:flex; flex-direction:column; gap:8px">';
+    reportCustomers.forEach(function (d) {
+      const canDelete = d.id != null && isFinite(Number(d.id));
+      html += '<div class="report-item">' +
+        '<div class="item-top" style="justify-content:space-between; align-items:center">' +
+        '<span class="item-title">' + esc(d.name) + '</span>' +
+        (canDelete
+          ? '<button type="button" class="item-del" onclick="askDeleteCustomer(' + Number(d.id) + ')" ' +
+            'aria-label="Видалити замовника">✕</button>'
+          : '') +
+        '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  box.innerHTML = html;
+}
+
+// Поле CSV: лишні лапки та «;» екрануємо, а початок на «=», «+», «-», «@» — щоб Excel не вважав це формулою.
+function csvCell(value) {
+  let text = String(value == null ? "" : value);
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+  return /[;"\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+function downloadCsv(text, filename) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  toast("Файл збережено");
+}
+
+// Архів: усі звіти, разом з оплаченими, без жодних фільтрів.
+function downloadAllReports() {
+  api("/api/reports").then(function (data) {
+    const rows = (data.reports || []).slice().sort(function (a, b) {
+      return (reportStamp(b) - reportStamp(a)) || (Number(b.id) - Number(a.id));
+    });
+    if (!rows.length) { toast("Звітів немає"); return; }
+    const lines = [["Дата", "Водій", "Замовник", "Кілометраж", "Оплачено"].join(";")];
+    rows.forEach(function (r) {
+      lines.push([
+        formatDate(r.created_at || ""),
+        r.driver || "",
+        r.customer || r.client || "",
+        Number(r.mileage) || 0,
+        Number(r.paid) ? "Так" : "Ні"
+      ].map(csvCell).join(";"));
+    });
+    downloadCsv("﻿" + lines.join("\r\n"), "zvity_" + localDateStr(new Date()) + ".csv");
+  }).catch(function (error) {
+    toast("Не вдалося скачати: " + ((error && error.message) || ""));
+  });
+}
+
+function backToCarFromReports() {
+  show("screen-car");
+  openCar(currentCar);
+}
+
+function openReportFromMain() {
+  showReportForm(currentCar);
+}
+
+// Видалити можна лише оплачений звіт. Видалення остаточне: у файлі-архіві його теж не буде.
+function askDeleteReport(reportId) {
+  const report = reportsCache.filter(function (r) { return Number(r.id) === Number(reportId); })[0];
+  if (!report || !Number(report.paid)) return;
+  const who = report.driver || report.customer || report.client || "";
+  openModal("Видалити звіт?",
+    who + " · " + formatDate(report.created_at || "") + " · " + (Number(report.mileage) || 0) + " км\n\n" +
+    "Звіт буде видалено остаточно, у файлі з архівом його теж не буде.",
+    function () { deleteReport(reportId); },
+    "Видалити"
+  );
+}
+
+function deleteReport(reportId) {
+  api("/api/reports/" + reportId, { method: "DELETE" })
+    .then(function (data) {
+      haptic();
+      reportsCache = reportsCache.filter(function (r) { return Number(r.id) !== Number(reportId); });
+      renderReportsList();
+      toast(data.message || "Звіт видалено");
+    })
+    .catch(function (error) {
+      toast("Не вдалося видалити звіт: " + ((error && error.message) || ""));
+    });
+}
+
+function toggleReportPaid(reportId, paid) {
+  api("/api/reports/" + reportId + "/paid", {
+    method: "PATCH",
+    body: JSON.stringify({ paid: paid })
+  })
+    .then(function () {
+      haptic();
+      reportsCache.forEach(function (r) {
+        if (Number(r.id) === Number(reportId)) r.paid = paid;
+      });
+      renderReportsList();
+      toast(paid ? "Оплачено: звіт в архіві" : "Позначку знято");
+    })
+    .catch(function (error) {
+      renderReportsList();   // повертаємо галочку, як було
+      toast("Помилка при оновленні: " + error.message);
+    });
+}
+
+function showError(message) {
+  const errorDiv = document.getElementById("report-form-error");
+  if (!errorDiv) { toast(message); return; }
+  errorDiv.textContent = message;
+  setTimeout(function () {
+    errorDiv.textContent = "";
+  }, 5000);
+}
+
+function hideReportForm() {
+  document.getElementById("report-form-fields").innerHTML = "";
+  disposeCombos();
+  show("screen-car");
+}
+// Минус не опускает значение ниже нуля.
+function bumpMoney(inputId, step) {
+  const field = document.getElementById(inputId);
+  if (!field) return;
+  const size = Math.abs(step) || 1;
+  const current = Number(field.value || 0);
+  // Значение округляем к кратному шага: «+» берёт ближайшее кратное сверху,
+  // «−» — снизу. Так сумма всегда круглая и движется в нужную сторону.
+  const ratio = current / size;
+  const base = step > 0
+    ? Math.floor(ratio + 1e-9) * size
+    : Math.ceil(ratio - 1e-9) * size;
+  let next = base + step;
+  if (!(next > 0)) next = 0;
+  field.value = String(Math.round(next * 100) / 100);
+  // Фокус не ставим: на телефоне всплывающая клавиатура перекрывает
+  // сами кнопки «−» и «+», и нажать их второй раз не получится.
+  haptic();
+}
+
+function showFuelForm() {
+  formKind = "fuel";
+  document.getElementById("form-title").textContent = "Заправка";
+  document.getElementById("form-error").textContent = "";
+  document.getElementById("form-fields").innerHTML =
+    '<label for="f-liters">Сколько литров</label>' +
+    '<input id="f-liters" name="liters" type="number" inputmode="decimal" step="0.01" ' +
+    'autocomplete="off" placeholder="например: 40…">' +
+    '<label for="f-price">Цена за литр, ₴</label>' +
+    '<div class="money-row">' +
+      '<button class="step-btn" type="button" aria-label="Меньше на 5 грн" ' +
+      'onclick="bumpMoney(\'f-price\', -5)">−</button>' +
+      '<input id="f-price" name="price" type="number" inputmode="decimal" step="0.01" ' +
+      'autocomplete="off" placeholder="например: 55…">' +
+      '<button class="step-btn" type="button" aria-label="Больше на 5 грн" ' +
+      'onclick="bumpMoney(\'f-price\', 5)">+</button>' +
+    '</div>' +
+    '<label for="f-odometer">Одометр, км</label>' +
+    '<input id="f-odometer" name="odometer" type="number" inputmode="numeric" ' +
+    'autocomplete="off" placeholder="например: 121000…">' +
+    '<div class="switch">' +
+    '<button id="f-full" type="button" class="on" onclick="setFull(true)">Полный бак</button>' +
+    '<button id="f-partial" type="button" onclick="setFull(false)">Частично</button>' +
+    '</div>';
+  show("screen-form");
+}
+
+function setFull(full) {
+  document.getElementById("f-full").className = full ? "on" : "";
+  document.getElementById("f-partial").className = full ? "" : "on";
+}
+
+function showServiceForm() {
+  formKind = "service";
+  catalogGroup = "service";
+  disposeCombos();
+  resetCatalog();
+  document.getElementById("form-title").textContent = "Обслуживание";
+  document.getElementById("form-error").textContent = "";
+  document.getElementById("form-fields").innerHTML =
+    '<label for="f-description">Что делали</label>' +
+    comboHtml("f-description", "например: Замена масла…") +
+    '<label for="f-amount">Сколько заплатили, ₴</label>' +
+    '<div class="money-row">' +
+      '<button class="step-btn" type="button" aria-label="Меньше на 100 грн" ' +
+      'onclick="bumpMoney(\'f-amount\', -100)">−</button>' +
+      '<input id="f-amount" name="amount" type="number" inputmode="decimal" step="0.01" ' +
+      'autocomplete="off" placeholder="например: 5000…">' +
+      '<button class="step-btn" type="button" aria-label="Больше на 100 грн" ' +
+      'onclick="bumpMoney(\'f-amount\', 100)">+</button>' +
+    '</div>' +
+    '<label for="f-odometer">Пробег, км</label>' +
+    '<input id="f-odometer" name="odometer" type="number" inputmode="numeric" ' +
+    'autocomplete="off" placeholder="например: 121000…">' +
+    '<label for="f-next-km">Следующее обслуживание через, км (не обязательно)</label>' +
+    '<input id="f-next-km" name="next_km" type="number" inputmode="numeric" ' +
+    'autocomplete="off" placeholder="например: 130000…">';
+  show("screen-form");
+
+  window.comboService = createCombo({
+    id: "f-description",
+    match: "contains",
+    sort: false,
+    addLabel: "+ Додати варіант",
+    addPlaceholder: "Що зробили",
+    addedMessage: "Варіант додано",
+    load: function () { return SERVICE_SUGGESTIONS.concat(loadCustomServices()); },
+    create: function (name) { saveCustomService(name); return { id: null, name: name }; }
+  });
+}
+
+function value(id) {
+  const field = document.getElementById(id);
+  return field ? field.value.trim() : "";
+}
+
+// Форма пробега: ставим машине новое значение одометра.
+function showMileageForm() {
+  formKind = "mileage";
+  document.getElementById("form-title").textContent = "Пробег";
+  document.getElementById("form-error").textContent = "";
+  document.getElementById("form-fields").innerHTML =
+    '<label for="f-mileage">Новый пробег, км</label>' +
+    '<input id="f-mileage" name="mileage" type="number" inputmode="numeric" ' +
+    'autocomplete="off" placeholder="например: 121000…">' +
+    '<div class="hint">Пробег не может быть меньше текущего.</div>';
+  show("screen-form");
+}
+
+// Форма правки госномера: номер можно поправить, если при вводе обрезался.
+function showPlateForm() {
+  formKind = "plate";
+  document.getElementById("form-title").textContent = "Госномер";
+  document.getElementById("form-error").textContent = "";
+  document.getElementById("form-fields").innerHTML =
+    '<label for="f-plate">Госномер</label>' +
+    '<input id="f-plate" name="plate" autocomplete="off" maxlength="10" ' +
+    'placeholder="например: АА 1111 АА" oninput="maskPlate(this)">' +
+    '<div class="hint">Номер можно поправить, если при вводе обрезался</div>';
+  // Показываем текущий номер — править удобнее, чем вводить заново.
+  document.getElementById("f-plate").value = displayPlate(currentCarPlate);
+  show("screen-form");
+}
+
+function saveForm() {
+  const errorBox = document.getElementById("form-error");
+  errorBox.textContent = "";
+  const button = document.getElementById("form-save");
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner light"></span> Сохраняю…';
+  let path = "";
+  let body = {};
+
+  if (formKind === "fuel") {
+    path = "/api/cars/" + currentCar + "/fuel";
+    body = {
+      liters: value("f-liters"),
+      price: value("f-price"),
+      odometer: value("f-odometer"),
+      is_full: document.getElementById("f-full").className === "on"
+    };
+  } else if (formKind === "mileage") {
+    path = "/api/cars/" + currentCar + "/mileage";
+    body = { mileage: value("f-mileage") };
+  } else if (formKind === "plate") {
+    path = "/api/cars/" + currentCar + "/plate";
+    body = { plate: value("f-plate") };
+  } else {
+    path = "/api/cars/" + currentCar + "/services";
+    body = {
+      description: value("f-description"),
+      amount: value("f-amount"),
+      odometer: value("f-odometer"),
+      next_km: value("f-next-km"),
+      next_date: value("f-next-date")
+    };
+  }
+
+  api(path, { method: "POST", body: JSON.stringify(body) })
+    .then(function (data) {
+      haptic();
+      toast(data.message || "Сохранено");
+      if (data.cloud_error) {
+        // Запись состоялась, но в облако не ушла — говорим честно.
+        setTimeout(function () { toast("Записано, но не выложено: " + data.cloud_error); }, 2400);
+      }
+      backToCar();
+    })
+    .catch(function (error) {
+      errorBox.textContent = error.message;
+    })
+    .finally(function () {
+      button.disabled = false;
+      button.textContent = "Сохранить";
+    });
+}
+
+// ---------- история ----------
+
+function showFuelHistory() {
+  document.getElementById("history-title").textContent = "История заправок";
+  loadHistory("/api/cars/" + currentCar + "/fuel", "fuel", renderFuel);
+}
+
+function showServiceHistory() {
+  document.getElementById("history-title").textContent = "История обслуживания";
+  loadHistory("/api/cars/" + currentCar + "/services", "services", renderServices);
+}
+
+function loadHistory(path, key, render) {
+  historyRequest = { path: path, key: key, render: render };
+  // Сразу открываем экран истории — иначе он остаётся скрытым.
+  show("screen-history");
+  const body = document.getElementById("history-body");
+  body.innerHTML = loadingHtml("Загружаю…");
+  api(path).then(function (data) {
+    let items = data[key] || [];
+    if (!items.length) {
+      body.innerHTML = emptyHtml("📋", "Пока пусто", "Записей по этому разделу ещё нет");
+      return;
+    }
+    let total = 0;
+    items.forEach(function (item) { total += Number(item.amount || 0); });
+    body.innerHTML =
+      '<div class="hist-total">' +
+        '<span class="hist-total-label">Итого</span>' +
+        '<span class="hist-total-sum">' + money(total) + '</span>' +
+      '</div>' +
+      '<div class="hist-list" id="hist-list"></div>';
+    const list = document.getElementById("hist-list");
+    items.forEach(function (item) {
+      const row = document.createElement("div");
+      row.className = "item";
+      row.innerHTML = render(item);
+      list.appendChild(row);
+    });
+  }).catch(function (error) {
+    body.innerHTML = errorHtml("Не удалось загрузить", error.message, "retryHistory()");
+  });
+}
+
+// Повторяет последний запрос истории (кнопка «Повторить»).
+function retryHistory() {
+  if (historyRequest) loadHistory(historyRequest.path, historyRequest.key, historyRequest.render);
+}
+
+function renderFuel(item) {
+  if (item.source === "barrel") {
+    // Заправка из бочки: цены нет, зато видно, откуда лили.
+    const kind = item.fuel_type === "petrol" ? "бензин" : "дизель";
+    return '<div class="item-top">' +
+      '<span class="item-title">' + num(item.liters) +
+      ' л · из бочки (' + kind + ')</span></div>' +
+      '<div class="item-sub">' + dateTime(item.created_at) + '</div>';
+  }
+  return '<div class="item-top">' +
+    '<span class="item-title">' + num(item.liters) + ' л × ' + money(item.price) + '</span>' +
+    '<span class="item-sum">' + money(item.amount) + '</span></div>' +
+    '<div class="item-sub">' + num(item.odometer) + ' км · ' + dateTime(item.created_at) +
+    (item.is_full ? ' · полный бак' : ' · частично') + '</div>';
+}
+
+function renderServices(item) {
+  let sub = dateTime(item.created_at);
+  if (item.odometer) sub = num(item.odometer) + " км · " + sub;
+  if (item.next_km) sub += " · следующее через " + num(item.next_km) + " км";
+  if (item.next_date) sub += " · следующее до " + item.next_date;
+  let html = '<div class="item-top">' +
+    '<span class="item-title">' + esc(item.description) + '</span>' +
+    '<span class="item-sum">' + money(item.amount) + '</span>' +
+    '<button class="item-del" aria-label="Удалить запись" ' +
+    'onclick="askDeleteService(' + Number(item.id) + ')">✕</button></div>' +
+    '<div class="item-sub">' + sub + '</div>';
+  // Подробности добавляем отдельной строкой, если они есть.
+  if (item.details) {
+    html += '<div class="item-sub">' + esc(item.details) + '</div>';
+  }
+  return html;
+}
+
+// ---------- удаление ----------
+
+let modalAction = null;  // что сделать, если пользователь нажал «Удалить»
+let lastFocus = null;    // кнопка, из которой открыли окно (туда вернём фокус)
+
+// Своё подтверждение вместо confirm(): внутри Telegram он работает плохо.
+function openModal(title, text, action, confirmText) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-text").textContent = text;
+  const yes = document.getElementById("modal-yes");
+  if (yes) yes.textContent = confirmText || "Удалить";
+  modalAction = action;
+  lastFocus = document.activeElement;
+  document.getElementById("modal").classList.remove("hidden");
+  // Фокус — на безопасную кнопку: удаление необратимо, поэтому по
+  // умолчанию стоит «Отмена». Всё равно можно нажать Enter.
+  const cancel = document.querySelector(".modal-actions .btn-secondary");
+  if (cancel) cancel.focus();
+}
+
+function closeModal() {
+  modalAction = null;
+  document.getElementById("modal").classList.add("hidden");
+  // Возвращаем фокус туда, откуда открыли окно.
+  if (lastFocus) { lastFocus.focus(); lastFocus = null; }
+}
+
+// Escape закрывает окно — как на любом нормальном диалоге.
+document.addEventListener("keydown", function (event) {
+  if (event.key !== "Escape") return;
+  if (!document.getElementById("modal").classList.contains("hidden")) {
+    closeModal();
+  }
+});
+
+function modalYes() {
+  const action = modalAction;
+  closeModal();
+  if (action) action();
+}
+
+// Скачать историю машины — отчёт обычным текстом (как /export у бота).
+// Из главного меню выгрузка идёт только по машинам.
+function downloadCarHistory(carId) {
+  if (!carId && currentCar) carId = currentCar;
+  if (!carId) return;
+  const car = (carsCache || []).filter(function (item) {
+    return Number(item.id) === Number(carId);
+  })[0];
+  const name = car && car.plate ? String(car.plate).replace(/[^\wа-яА-ЯёЁІіЇЄҐ]/g, "") : "avto";
+  downloadReport("?car_id=" + carId, name + ".txt");
+}
+
+// История бочки: по тому виду топлива, который открыт на экране.
+function downloadBarrelHistory() {
+  downloadReport("?barrel=" + barrelType, "bochka.txt");
+}
+
+function addPickItem(list, label, filename, query) {
+  const button = document.createElement("button");
+  button.className = "btn-secondary";
+  button.textContent = label;
+  button.onclick = function () {
+    downloadReport(query, filename);
+  };
+  list.appendChild(button);
+}
+
+
+// Качает отчёт файлом: сервер отдаёт его как вложение.
+function downloadReport(query, filename) {
+  const options = { headers: {} };
+  if (INIT_DATA) options.headers["X-Telegram-Init-Data"] = INIT_DATA;
+  startWait();
+  fetch("/api/report" + query, options).then(function (response) {
+    if (!response.ok) throw new Error("не удалось выгрузить историю");
+    return response.blob();
+  }).then(function (blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast("Файл сохранён");
+  }).catch(function (error) {
+    toast(error.message);
+  }).finally(function () {
+    stopWait();
+  });
+}
+
+// Очистка истории бочки — только у полного доступа.
+function askClearBarrel() {
+  openModal("Очистить историю бочки?",
+    "Все записи бочки удалятся — восстановить не получится.",
+    function () { clearBarrel(); }, "Очистить");
+}
+
+function clearBarrel() {
+  api("/api/barrel/clear", { method: "POST" }).then(function (data) {
+    haptic();
+    toast(data.message || "История бочки очищена");
+    loadBarrel();
+  }).catch(function (error) {
+    toast(error.message);
+  });
+}
+
+function askDeleteCar() {
+  openModal("Удалить машину?", "Записи тоже удалятся — восстановить не получится.",
+    function () { deleteCar(); });
+}
+
+function deleteCar() {
+  api("/api/cars/" + currentCar, { method: "DELETE" }).then(function (data) {
+    haptic();
+    toast(data.message || "Машина удалена");
+    currentCar = null;
+    show("screen-cars");
+    loadCars();
+  }).catch(function (error) {
+    toast("Не удалось удалить: " + error.message);
+  });
+}
+
+function askDeleteService(serviceId) {
+  openModal("Удалить запись?", "Запись об обслуживании исчезнет из истории.",
+    function () { deleteService(serviceId); });
+}
+
+function deleteService(serviceId) {
+  api("/api/cars/" + currentCar + "/services/" + serviceId, { method: "DELETE" })
+    .then(function (data) {
+      haptic();
+      toast(data.message || "Запись удалена");
+      retryHistory();
+    })
+    .catch(function (error) {
+      toast("Не удалось удалить: " + error.message);
+    });
+}
+
+// ---------- добавление машины ----------
+
+function showAddCar() {
+  document.getElementById("ac-error").textContent = "";
+  document.getElementById("ac-model").value = "";
+  document.getElementById("ac-plate").value = "";
+  document.getElementById("ac-mileage").value = "";
+  show("screen-addcar");
+}
+
+// Пока машина добавляется, кнопку второй раз нажать нельзя — иначе
+// в базе появятся две одинаковые машины.
+var carSaving = false;
+
+function saveCar() {
+  if (carSaving) return;
+  const errorBox = document.getElementById("ac-error");
+  const button = document.getElementById("ac-save");
+  const model = value("ac-model");
+  const plate = value("ac-plate");
+  errorBox.textContent = "";
+  if (!model || !plate) {
+    errorBox.textContent = "Нужна марка и номер";
+    return;
+  }
+  carSaving = true;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner light"></span> Добавляю…';
+  api("/api/cars", {
+    method: "POST",
+    body: JSON.stringify({
+      model: model,
+      plate: plate,
+      mileage: value("ac-mileage")
+    })
+  }).then(function (data) {
+    haptic();
+    toast(data.message || "Машина добавлена");
+    backToCars();
+  }).catch(function (error) {
+    errorBox.textContent = error.message;
+    carSaving = false;
+    button.disabled = false;
+    button.textContent = "Добавить";
+  });
+}
+
+// ---------- старт ----------
+
+applyTheme();
+show("screen-cars");
+loadCars();
+document.getElementById("filter-time").addEventListener("change", renderReportsList);
+document.getElementById("filter-driver").addEventListener("change", renderReportsList);
+document.getElementById("filter-show-paid").addEventListener("change", renderReportsList);
+
+</script>
 </body>
 </html>

@@ -175,7 +175,16 @@ def test_miniapp_page(client):
     for path in ("/app", "/"):
         response = client.get(path)
         assert response.status_code == 200, path
-        assert b"Car Tracker" in response.data
+        # Основной интерфейс - старый (экран списка фур и кнопка затрат).
+        assert b"screen-cars" in response.data
+        assert b"btn-costs" in response.data
+
+
+def test_miniapp_new_page(client):
+    """Новый интерфейс остался доступен по /new."""
+    response = client.get("/new")
+    assert response.status_code == 200
+    assert b"Car Tracker" in response.data
 
 
 def test_static_files(client):

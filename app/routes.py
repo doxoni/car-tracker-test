@@ -80,8 +80,14 @@ def health_db():
 @web_bp.get("/")
 @web_bp.get("/app")
 def miniapp():
-    """Страница Telegram Mini App."""
+    """Страница Telegram Mini App (старый интерфейс)."""
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@web_bp.get("/new")
+def miniapp_new():
+    """Новый интерфейс Mini App - оставлен рядом со старым."""
+    return send_from_directory(STATIC_DIR, "new.html")
 
 
 @web_bp.get("/static/<path:filename>")
