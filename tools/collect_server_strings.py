@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Собрать русские строки сервера (сообщения API и бота) для перевода.
 
+Строки берём через ast: так в список не попадают докстринги и комментарии,
+которые видит только разработчик.
+
 Запуск:
     python tools/collect_server_strings.py
 
@@ -8,6 +11,7 @@
     tools/i18n_server_ru.json - строки, которые видит пользователь
 """
 
+import ast
 import json
 import os
 import re
@@ -20,14 +24,44 @@ SOURCES = [
     os.path.join(ROOT, "app", "routes.py"),
     os.path.join(ROOT, "bot", "bot.py"),
     os.path.join(ROOT, "app", "i18n.py"),
+    os.path.join(ROOT, "app", "notifications.py"),
 ]
 
-# Строки, которые не переводим (служебные, имена, единицы).
+# Строки, которые не переводим (служебные, имена, единицы, названия языков).
 SKIP = {
     "водитель",
     "оператор",
     "суперадмин",
+    "🇷🇺 Русский",
+    "🇺🇦 Українська",
+    "⚠️ TELEGRAM_TOKEN не задан, уведомление не отправлено",
 }
+
+
+def iter_strings(path):
+    """Строковые литералы файла, кроме докстрингов и кусков f-строк."""
+    source = open(path, encoding="utf-8").read()
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr):
+                value = body[0].value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    docstrings.add(id(value))
+    # Куски f-строк ("одометр меньше текущего пробега (") - это не готовая
+    # фраза, переводить её отдельно бессмысленно.
+    in_fstring = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                in_fstring.add(id(part))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) in docstrings or id(node) in in_fstring:
+                continue
+            yield node.value
 
 
 def main() -> int:
@@ -36,9 +70,7 @@ def main() -> int:
     for path in SOURCES:
         if not os.path.exists(path):
             continue
-        source = open(path, encoding="utf-8").read()
-        for match in re.finditer(r'"([^"\n]*)"|\'([^\'\n]*)\'', source):
-            value = match.group(1) if match.group(1) is not None else match.group(2)
+        for value in iter_strings(path):
             if not value or len(value) > 200:
                 continue
             if not CYR.search(value):
@@ -46,6 +78,8 @@ def main() -> int:
             if "<" in value or ">" in value or "{" in value or "}" in value:
                 continue
             if value.strip() != value:
+                continue
+            if len(value.strip()) < 2:
                 continue
             if value in SKIP:
                 continue

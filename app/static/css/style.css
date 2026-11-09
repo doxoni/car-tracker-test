@@ -95,21 +95,39 @@ button, input, select, textarea, .vehicle-card, .expense-row { touch-action: man
 }
 .tg-header-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--hint);
   font-size: 13px;
-  max-width: 55%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
 }
 #user-badge {
   margin-left: auto;
   color: var(--hint);
   font-size: 13px;
+  min-width: 0;
   max-width: 55%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Кнопка переключения языка */
+.lang-btn {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.lang-btn:active {
+  background: var(--line);
 }
 
 /* ---------- Основной блок ---------- */

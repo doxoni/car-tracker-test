@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#212121">
 <title>Автомобили</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/static/i18n_dict.js"></script>
+<script src="/static/i18n.js"></script>
 <style>
   :root {
     --bg: #212121;
@@ -142,6 +144,12 @@
   .top-row #btn-costs {
     flex: 1 1 0; width: auto; min-width: 0; margin: 0;
     min-height: 36px; padding: 6px 16px; font-size: 14px; border-radius: 10px;
+  }
+  /* Кнопка смены языка: узкая, с флагом. */
+  .top-row #btn-lang {
+    flex: 0 0 auto; width: auto; min-width: 0; margin: 0;
+    min-height: 36px; padding: 6px 10px; font-size: 13px; border-radius: 10px;
+    white-space: nowrap;
   }
   #btn-main-3 { position: relative; display: block; }
   #btn-costs {
@@ -668,6 +676,7 @@
     <button class="btn-secondary" id="btn-costs" onclick="showCosts()">
       <span>Затраты</span><span class="costs-amount" id="costs-amount"></span>
     </button>
+    <button class="btn-secondary" id="btn-lang" type="button">🇷🇺 Русский</button>
   </div>
   <div id="barrel-box"></div>
   <h1>Мои автомобили</h1>
@@ -1815,23 +1824,28 @@ function downloadReportText() {
   const cars = summary.car_summaries || [];
   const totals = summary.totals || {};
 
+  // Названия видов топлива и действий бочки для выгрузки текстом.
+  const BARREL_TYPE_NAME = { diesel: "Дизель", petrol: "Бензин" };
+  const BARREL_ACTION_NAME = { add: "Пополнение", fill: "Заправка", sub: "Убавление" };
+
   const headerLines = [];
-  headerLines.push("ОТЧЁТ ПО ВСЕМ АВТО");
+  headerLines.push(tr("ОТЧЁТ ПО ВСЕМ АВТО"));
   headerLines.push("=".repeat(60));
-  headerLines.push("Всего машин: " + (totals.car_count || 0));
-  headerLines.push("Общие расходы: " + (totals.total_expenses ? totals.total_expenses.toFixed(2) : 0) + " грн");
-  headerLines.push("Заправки: " + (totals.fuel_count || 0) + " раз(ов), " +
+  headerLines.push(tr("Всего машин: " + (totals.car_count || 0)));
+  headerLines.push(tr("Общие расходы: " + (totals.total_expenses ? totals.total_expenses.toFixed(2) : 0) + " грн"));
+  headerLines.push(tr("Заправки: " + (totals.fuel_count || 0) + " раз(ов), " +
     (totals.total_fuel_liters ? totals.total_fuel_liters.toFixed(1) : 0) + " л, " +
-    (totals.total_fuel_amount ? totals.total_fuel_amount.toFixed(2) : 0) + " грн");
-  headerLines.push("Обслуживание: " + (totals.total_service_count || 0) + " раз(ов), " +
-    (totals.total_services ? totals.total_services.toFixed(2) : 0) + " грн");
+    (totals.total_fuel_amount ? totals.total_fuel_amount.toFixed(2) : 0) + " грн"));
+  headerLines.push(tr("Обслуживание: " + (totals.total_service_count || 0) + " раз(ов), " +
+    (totals.total_services ? totals.total_services.toFixed(2) : 0) + " грн"));
   headerLines.push("");
-  headerLines.push("БОЧКА:");
+  headerLines.push(tr("БОЧКА:"));
   headerLines.push("=".repeat(60));
   Object.keys(summary.barrel_totals || {}).forEach(function (type) {
     Object.keys(summary.barrel_totals[type]).forEach(function (action) {
       const total = summary.barrel_totals[type][action] || 0;
-      headerLines.push(type + " " + action + ": " + total + " л");
+      headerLines.push(tr((BARREL_TYPE_NAME[type] || type) + " " +
+        (BARREL_ACTION_NAME[action] || action) + ": " + total + " л"));
     });
   });
   headerLines.push("");
@@ -1850,15 +1864,15 @@ function downloadReportText() {
     })
   ).then(function (results) {
     const detailLines = [];
-    detailLines.push("ПО КАЖДОЙ МАШИНЕ:");
+    detailLines.push(tr("ПО КАЖДОЙ МАШИНЕ:"));
     detailLines.push("=".repeat(60));
     cars.forEach(function (car, idx) {
-      detailLines.push("Машина: " + esc(car.model) + "  номер " + esc(displayPlate(car.plate)));
-      detailLines.push("Пробег: " + num(car.mileage) + " км");
+      detailLines.push(tr("Машина: " + esc(car.model) + "  номер " + esc(displayPlate(car.plate))));
+      detailLines.push(tr("Пробег: " + num(car.mileage) + " км"));
       detailLines.push("");
 
       const fuels = (results[idx][0] && results[idx][0].fuel) || [];
-      detailLines.push("Заправки (" + fuels.length + "):");
+      detailLines.push(tr("Заправки (" + fuels.length + "):"));
       if (fuels.length) {
         fuels.forEach(function (f) {
           const full = Number(f.is_full) === 1 ? "полный бак" : "частично";
@@ -1867,21 +1881,21 @@ function downloadReportText() {
           const price = Number(f.price || 0).toFixed(2);
           const amount = Number(f.amount || 0).toFixed(2);
           const odo = f.odometer != null ? num(f.odometer) : "—";
-          detailLines.push("  " + date + "  " + liters + " л по " + price + " = " + amount +
-            ", одометр " + odo + ", " + full);
+          detailLines.push(tr("  " + date + "  " + liters + " л по " + price + " = " + amount +
+            ", одометр " + odo + ", " + full));
         });
       }
       detailLines.push("");
 
       const services = (results[idx][1] && results[idx][1].services) || [];
-      detailLines.push("Обслуживание (" + services.length + "):");
+      detailLines.push(tr("Обслуживание (" + services.length + "):"));
       if (services.length) {
         services.forEach(function (s) {
           const date = esc(s.created_at || "");
           const desc = esc(s.description || "");
           const amount = Number(s.amount || 0).toFixed(2);
           const odo = s.odometer != null ? num(s.odometer) : "—";
-          detailLines.push("  " + date + "  " + desc + ": " + amount + ", одометр " + odo);
+          detailLines.push(tr("  " + date + "  " + tr(desc) + ": " + amount + ", одометр " + odo));
         });
       }
       detailLines.push("");
@@ -1891,7 +1905,7 @@ function downloadReportText() {
     const fullText = headerLines.concat(detailLines).join("\n");
     downloadText(fullText, "otchet_all_cars.txt");
   }).catch(function () {
-    const fallback = headerLines.push("Ошибка загрузки деталей по машинам") && headerLines.join("\n");
+    const fallback = headerLines.push(tr("Ошибка загрузки деталей по машинам")) && headerLines.join("\n");
     downloadText(fallback, "otchet_all_cars.txt");
   });
 }
@@ -2018,7 +2032,7 @@ function monthName(monthKey) {
   const parts = String(monthKey || "").split("-");
   const index = Number(parts[1]) - 1;
   if (index < 0 || index > 11) return monthKey || "";
-  return MONTH_NAMES[index] + " " + (parts[0] || "");
+  return tr(MONTH_NAMES[index]) + " " + (parts[0] || "");
 }
 
 // Сумма за месяц рядом с кнопкой «Затраты».
