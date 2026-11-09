@@ -9,16 +9,22 @@
   - `app/db_schema.py` — приведение схемы к актуальной (миграции alembic; при сбое — `db.create_all()`).
   - `app/db_retry.py` — повтор запроса к БД один раз, если база была «спящей».
   - `app/config.py` — конфиг из переменных окружения (`DATABASE_URL` / `DB_HOST`+... / SQLite), размер пула через `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`.
-  - `app/models.py` — модели: `User`, `Vehicle`, `Expense`, `FuelBarrel`.
+  - `app/models.py` — модели: `User`, `Vehicle`, `Expense`, `FuelBarrel`, а также `Driver`, `Customer`, `FuelEntry`, `ServiceEntry`, `Report` (сущности старой системы).
   - `app/auth.py` — авторизация по Telegram initData, уровни доступа 1/2/3.
-  - `app/routes.py` — API (`/api/...`) и веб-маршруты Mini App (`/`, `/app`, `/static/...`).
+  - `app/routes.py` — новый API (`/api/vehicles`, `/api/expenses`, `/api/barrels`, ...) и веб-маршруты Mini App (`/`, `/app`, `/new`, `/static/...`).
+  - `app/legacy_routes.py` — API старой системы (`/api/cars`, `/api/drivers`, `/api/customers`, `/api/catalog`, `/api/barrel`, `/api/month-costs`, `/api/report-summary`, `/api/report`, `/api/reports`), который использует старая GUI.
+  - `app/legacy_catalog.py` — каталог работ по обслуживанию (101 пункт, группа `service`).
+  - `app/import_legacy.py` — импорт данных старой `cars.db` в новую базу.
   - `app/notifications.py` — отправка уведомлений в Telegram.
   - `app/main.py` — точка входа: веб-сервер + бот в отдельном потоке.
   - `app/bot_runner.py` — запуск бота в потоке (для gunicorn на Render).
 - `bot/bot.py` — Telegram-бот на `python-telegram-bot` (long polling).
-- `app/static/` — файлы Mini App (HTML/CSS/JS).
+- `app/static/` — файлы Mini App: `index.html` — старая GUI (основная, её открывает бот по `/app`), `new.html` — новый интерфейс (доступен по `/new`), `css/` и `js/` — оформление нового интерфейса.
 - `migrations/` — Alembic-миграции; `alembic.ini` в корне, адрес БД берётся из `DATABASE_URL`.
 - `tests/test_app.py` — pytest-тесты на SQLite.
+- `tests/test_import_legacy.py` — проверка импорта старой базы.
+- `tests/test_legacy_routes.py` — проверка API старой системы.
+- `tests/test_legacy_gui_contract.py` — сверка адресов, которые вызывает старая GUI, с серверными маршрутами.
 - `wsgi.py` — точка входа для gunicorn (`wsgi:app`).
 
 Скрипты эксплуатации:
@@ -40,6 +46,13 @@ python app/main.py                 # запуск веба + бота в одн�
 pip install -r requirements.txt    # зависимости
 python -m pytest tests/ -q        # тесты
 .\setup_all.cmd 123456789         # создать облачную БД и задеплоить на Render
+```
+
+Одноразовые скрипты:
+
+```powershell
+python -m app.import_legacy --db "C:\path\cars.db"   # перенос старой базы в новую
+python check_legacy_api.py --base http://127.0.0.1:5055   # сверка API с эталоном
 ```
 
 Переменные окружения:
@@ -121,6 +134,23 @@ Actions опаздывают на часы. Команда `auto` смотрит
 ## Тестирование
 
 Автотесты есть: `python -m pytest tests/ -q`. Проверяются health-check, отдача Mini App, 401 без авторизации и работа дашборда под тестовым пользователем.
+
+## Старая GUI и совместимый API
+
+Основной интерфейс Mini App - старый (`app/static/index.html`). Он работает поверх
+совместимого API в `app/legacy_routes.py`, который повторяет контракт старого
+проекта: ответы вида `{ok: true, ...}` или `{ok: false, error: "..."}`, адреса
+`/api/cars`, `/api/cars/<id>/fuel`, `/api/cars/<id>/services`, `/api/drivers`,
+`/api/customers`, `/api/catalog`, `/api/barrel`, `/api/month-costs`,
+`/api/report-summary`, `/api/report` (текстовый файл), `/api/reports`.
+
+Важно:
+
+- Названия blueprint и его маршрутов менять нельзя - GUI завязана на эти адреса.
+- Каталог работ лежит в `app/legacy_catalog.py` (список, не база).
+- Уровни доступа в старой системе: 2 - бочка, 3 - отчёты.
+- Проверка совместимости: `python check_legacy_api.py --base http://127.0.0.1:5055`
+  (эталон - старый проект на порту 8000) и `tests/test_legacy_gui_contract.py`.
 
 ## Коммиты и Pull Request
 
