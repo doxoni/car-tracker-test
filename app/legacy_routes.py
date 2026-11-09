@@ -1155,7 +1155,13 @@ def api_barrel_clear():
 @bp.get("/month-costs")
 @require_auth
 def api_month_costs():
-    """Итоговые затраты за текущий месяц по видимым фурам."""
+    """Итоговые затраты за текущий месяц по видимым фурам.
+
+    Доступно с 2 уровня (оператор) и выше.
+    """
+    if not _is_full_admin(_level()):
+        return _fail("затраты доступны с 2 уровня", 403)
+
     vehicles = _visible_vehicles()
     month_start = _month_start()
     totals = {"expenses": 0.0, "fuel": 0.0, "services": 0.0, "total": 0.0}
@@ -1386,7 +1392,13 @@ def api_report():
 @bp.get("/reports")
 @require_auth
 def api_reports():
-    """Список отчётов с фильтрацией."""
+    """Список отчётов с фильтрацией.
+
+    Доступно только у суперадмина (уровень 3).
+    """
+    if not _is_super_admin(_level()):
+        return _fail("отчёты доступны только супер-админу", 403)
+
     driver_id = request.args.get("driver_id", type=int)
     customer_id = request.args.get("customer_id", type=int)
     days = request.args.get("days", type=int)
@@ -1424,7 +1436,13 @@ def api_reports():
 @bp.post("/reports")
 @require_auth
 def api_report_add():
-    """Добавить отчёт."""
+    """Добавить отчёт.
+
+    Доступно только у суперадмина (уровень 3).
+    """
+    if not _is_super_admin(_level()):
+        return _fail("отчёты доступны только супер-админу", 403)
+
     data = request.get_json(silent=True) or {}
     driver_id = data.get("driver_id")
     customer_id = data.get("customer_id")
@@ -1461,7 +1479,13 @@ def api_report_add():
 @bp.delete("/reports/<int:report_id>")
 @require_auth
 def api_report_delete(report_id: int):
-    """Удалить отчёт."""
+    """Удалить отчёт.
+
+    Доступно только у суперадмина (уровень 3).
+    """
+    if not _is_super_admin(_level()):
+        return _fail("отчёты доступны только супер-админу", 403)
+
     report = db.session.get(Report, report_id)
     if report is None:
         return _fail("отчёт не найден", 404)
@@ -1473,7 +1497,13 @@ def api_report_delete(report_id: int):
 @bp.patch("/reports/<int:report_id>/paid")
 @require_auth
 def api_report_paid(report_id: int):
-    """Отметить отчёт оплаченным или снять отметку."""
+    """Отметить отчёт оплаченным или снять отметку.
+
+    Доступно только у суперадмина (уровень 3).
+    """
+    if not _is_super_admin(_level()):
+        return _fail("отчёты доступны только супер-админу", 403)
+
     report = db.session.get(Report, report_id)
     if report is None:
         return _fail("отчёт не найден", 404)

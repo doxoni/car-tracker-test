@@ -214,3 +214,69 @@ def test_level_one_cannot_manage_barrel(client, app):
 
     assert response.status_code == 403
     assert response.get_json()["ok"] is False
+
+
+def test_level_one_cannot_see_costs(client, app):
+    """Затраты доступны с 2 уровня, водитель их не видит."""
+    from app import db
+
+    with app.app_context():
+        _make_user(1)
+
+    response = client.get("/api/month-costs")
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
+def test_level_two_can_see_costs(client, app):
+    """Оператор (2 уровень) затраты видит."""
+    from app import db
+
+    with app.app_context():
+        _make_user(2)
+
+    response = client.get("/api/month-costs")
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+
+
+def test_level_two_cannot_see_reports(client, app):
+    """Отчёты доступны только с 3 уровня."""
+    from app import db
+
+    with app.app_context():
+        _make_user(2)
+
+    response = client.get("/api/reports")
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
+def test_level_one_cannot_see_reports(client, app):
+    """Водитель (1 уровень) список отчётов не получает."""
+    from app import db
+
+    with app.app_context():
+        _make_user(1)
+
+    response = client.get("/api/reports")
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
+def test_level_three_can_see_reports(client, app):
+    """Суперадмин (3 уровень) отчёты видит."""
+    from app import db
+
+    with app.app_context():
+        _make_user(3)
+
+    response = client.get("/api/reports")
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+

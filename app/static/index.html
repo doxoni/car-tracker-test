@@ -658,11 +658,28 @@
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filter-label { color: var(--hint); font-size: 12px; font-weight: 500; margin-right: 4px; white-space: nowrap; }
 .filter-select { flex: 1; min-width: 120px; }
+/* Поля периода: два календаря рядом, между ними - тире. */
+.filter-period { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.filter-date { position: relative; flex: 1 1 130px; min-width: 0; }
+.filter-dash { color: var(--hint); font-size: 15px; }
+.period-chips { margin-top: 8px; }
+.period-chip {
+  padding: 7px 14px; min-height: 0; width: auto;
+  background: var(--chip); color: var(--chip_text);
+  border: 1px solid transparent; border-radius: 999px;
+  font-size: 13px; font-weight: 500;
+}
+.period-chip.on { background: var(--btn); color: var(--btn_text); font-weight: 600; }
 .show-paid-row { display: flex; align-items: center; margin-top: 10px; color: var(--hint); font-size: 14px; cursor: pointer; user-select: none; }
 .report-item.is-paid .report-main { opacity: .55; }
 @media (max-width: 400px) {
-  .filter-row { flex-direction: column; gap: 4px; }
+  .filter-row { flex-direction: column; gap: 6px; align-items: stretch; }
   .filter-label { margin-bottom: 2px; }
+  /* В колонке flex-basis - это высота, поэтому размеры задаём явно. */
+  .filter-period { flex: 0 0 auto; width: 100%; }
+  .filter-select { flex: 0 0 auto; width: 100%; }
+  .period-chips { flex-direction: row; gap: 8px; }
+  .period-chip { flex: 0 0 auto; }
 }
 </style>
 </head>
@@ -672,8 +689,8 @@
 
 <div id="screen-cars">
   <div class="top-row">
-    <button class="btn-secondary" id="btn-main-3" onclick="openReportFromMain()">Отчёт</button>
-    <button class="btn-secondary" id="btn-costs" onclick="showCosts()">
+    <button class="btn-secondary hidden" id="btn-main-3" onclick="openReportFromMain()">Отчёт</button>
+    <button class="btn-secondary hidden" id="btn-costs" onclick="showCosts()">
       <span>Затраты</span><span class="costs-amount" id="costs-amount"></span>
     </button>
     <button class="btn-secondary" id="btn-lang" type="button">🇷🇺 Русский</button>
@@ -864,18 +881,43 @@
   <h1>Все отчёты</h1>
   <div class="filters-bar">
     <div class="filter-row">
-      <label class="filter-label" for="filter-time">Час</label>
-      <select id="filter-time" class="filter-select">
-        <option value="7">1 неделя</option>
-        <option value="14">2 недели</option>
-        <option value="21">3 недели</option>
-        <option value="30">1 месяц</option>
-        <option value="60" selected>2 месяца</option>
-      </select>
+      <label class="filter-label" for="filter-from-view">Период</label>
+      <div class="filter-period">
+        <div class="filter-date">
+          <div class="datefield" id="filter-from-field">
+            <input type="hidden" id="filter-from">
+            <input type="text" id="filter-from-view" readonly autocomplete="off" role="combobox"
+              aria-haspopup="dialog" aria-expanded="false" placeholder="с какого числа">
+            <button type="button" class="datefield-btn" tabindex="-1" aria-label="Открыть календарь">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>
+              <path d="M3 10h18M8 3v4M16 3v4"/></svg></button>
+          </div>
+          <div class="cal" id="filter-from-cal" role="dialog" aria-label="Календарь"></div>
+        </div>
+        <span class="filter-dash">—</span>
+        <div class="filter-date">
+          <div class="datefield" id="filter-to-field">
+            <input type="hidden" id="filter-to">
+            <input type="text" id="filter-to-view" readonly autocomplete="off" role="combobox"
+              aria-haspopup="dialog" aria-expanded="false" placeholder="по какое число">
+            <button type="button" class="datefield-btn" tabindex="-1" aria-label="Открыть календарь">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>
+              <path d="M3 10h18M8 3v4M16 3v4"/></svg></button>
+          </div>
+          <div class="cal" id="filter-to-cal" role="dialog" aria-label="Календарь"></div>
+        </div>
+      </div>
       <label class="filter-label" for="filter-driver">Водитель</label>
       <select id="filter-driver" class="filter-select">
         <option value="all">Все</option>
       </select>
+    </div>
+    <div class="filter-row period-chips">
+      <button type="button" class="period-chip" data-days="7" onclick="setReportPeriod(7)">Неделя</button>
+      <button type="button" class="period-chip" data-days="30" onclick="setReportPeriod(30)">Месяц</button>
+      <button type="button" class="period-chip" data-days="0" onclick="setReportPeriod(0)">Всё время</button>
     </div>
     <label class="show-paid-row"><span class="paid-check"><input type="checkbox" id="filter-show-paid"></span>Показать оплаченные</label>
   </div>
@@ -1641,10 +1683,12 @@ function loadCars() {
     carsCache = data.cars || [];
     isAdmin = !!data.is_admin;
     userLevel = data.level || 0;
+    // Кнопки «Отчёт» и «Затраты» видны в зависимости от уровня доступа.
+    renderTopButtons();
     // Бочка появляется, когда известно, есть ли полный доступ.
     loadBarrelMenu();
     // Сумма затрат за месяц рядом с кнопкой «Затраты».
-    if (!searchQuery) loadCostsAmount();
+    if (!searchQuery && userLevel >= 2) loadCostsAmount();
     if (!data.cars.length) {
       if (searchQuery) {
         box.innerHTML = emptyHtml("🔍", "Ничего не нашлось",
@@ -2033,6 +2077,14 @@ function monthName(monthKey) {
   const index = Number(parts[1]) - 1;
   if (index < 0 || index > 11) return monthKey || "";
   return tr(MONTH_NAMES[index]) + " " + (parts[0] || "");
+}
+
+// Верхние кнопки главного экрана: «Отчёт» — с 3 уровня, «Затраты» — со 2-го.
+function renderTopButtons() {
+  const reportBtn = document.getElementById("btn-main-3");
+  if (reportBtn) reportBtn.classList.toggle("hidden", userLevel < 3);
+  const costsBtn = document.getElementById("btn-costs");
+  if (costsBtn) costsBtn.classList.toggle("hidden", userLevel < 2);
 }
 
 // Сумма за месяц рядом с кнопкой «Затраты».
@@ -2676,7 +2728,9 @@ function parseIsoDate(s) {
 }
 
 // Значение сохраняется в скрытом поле #id как «ГГГГ-ММ-ДД»; на экране — «ДД.ММ.ГГГГ».
-function initDateField(id) {
+// onChange(iso) вызывается, когда дату выбрали в календаре или задали снаружи.
+// permanent = true - поле живёт всё время (не чистится при смене форм).
+function initDateField(id, onChange, permanent) {
   const hidden = document.getElementById(id);
   const box = document.getElementById(id + "-field");
   const view = document.getElementById(id + "-view");
@@ -2759,6 +2813,7 @@ function initDateField(id) {
       sync();
       close();
       haptic();
+      if (onChange) onChange(hidden.value);
     }
   });
   view.addEventListener("click", toggle);
@@ -2780,13 +2835,24 @@ function initDateField(id) {
   document.addEventListener("pointerdown", onOutside, true);
 
   sync();
-  comboRegistry.push({
-    destroy: function () {
-      document.removeEventListener("pointerdown", onOutside, true);
-      close();
+  if (!permanent) {
+    comboRegistry.push({
+      destroy: function () {
+        document.removeEventListener("pointerdown", onOutside, true);
+        close();
+      }
+    });
+  }
+  return {
+    close: close,
+    get: function () { return hidden.value; },
+    // Задать дату снаружи (кнопки быстрого выбора): пустая строка - без даты.
+    set: function (iso, silent) {
+      hidden.value = iso || "";
+      sync();
+      if (!silent && onChange) onChange(hidden.value);
     }
-  });
-  return { close: close };
+  };
 }
 
 function showReportForm(carId) {
@@ -3012,16 +3078,90 @@ function showAllReports() {
   });
 }
 
-// Фильтры: время (в днях), водитель, «Показать оплаченные». Оплаченные по умолчанию скрыты.
+// ---------- период отчётов: с какого числа по какое ----------
+
+// Поля «с» и «по» живут всё время на экране «Все отчёты».
+let reportFromField = null;
+let reportToField = null;
+
+// Начало дня в миллисекундах; null - даты нет (граница не задана).
+function periodStart(iso) {
+  const d = parseIsoDate(iso);
+  return d ? d.getTime() : null;
+}
+
+// Конец дня: последняя миллисекунда выбранного числа.
+function periodEnd(iso) {
+  const d = parseIsoDate(iso);
+  if (!d) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() - 1;
+}
+
+// Быстрый выбор: 7 - неделя, 30 - месяц, 0 - всё время (без границ).
+function setReportPeriod(days, silent) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let fromIso = "";
+  let toIso = "";
+  if (days > 0) {
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
+    fromIso = localDateStr(from);
+    toIso = localDateStr(today);
+  }
+  if (reportFromField) reportFromField.set(fromIso, true);
+  if (reportToField) reportToField.set(toIso, true);
+  markPeriodChips();
+  if (!silent) renderReportsList();
+}
+
+// Пользователь выбрал дату в календаре: если границы перепутаны - меняем их местами.
+function onReportPeriodChange() {
+  const fromVal = document.getElementById("filter-from").value || "";
+  const toVal = document.getElementById("filter-to").value || "";
+  const fromTime = periodStart(fromVal);
+  const toTime = periodStart(toVal);
+  if (fromTime !== null && toTime !== null && fromTime > toTime) {
+    if (reportFromField) reportFromField.set(toVal, true);
+    if (reportToField) reportToField.set(fromVal, true);
+  }
+  markPeriodChips();
+  renderReportsList();
+}
+
+// Подсветить кнопку быстрого выбора, если текущий период ей соответствует.
+function markPeriodChips() {
+  const fromVal = document.getElementById("filter-from").value || "";
+  const toVal = document.getElementById("filter-to").value || "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = localDateStr(today);
+  let activeDays = 0;
+  if (toVal === todayIso && fromVal) {
+    const days = Math.round((today.getTime() - periodStart(fromVal)) / (24 * 60 * 60 * 1000)) + 1;
+    activeDays = days;
+  }
+  if (!fromVal && !toVal) activeDays = 0;
+  const chips = document.querySelectorAll(".period-chip");
+  for (let i = 0; i < chips.length; i++) {
+    const days = parseInt(chips[i].dataset.days, 10);
+    const on = days === 0 ? (!fromVal && !toVal) : (days === activeDays);
+    chips[i].classList.toggle("on", on);
+  }
+}
+
+// Фильтры: период (с какого по какое число), водитель, «Показать оплаченные».
+// Оплаченные по умолчанию скрыты.
 function renderReportsList() {
-  const days = parseInt(document.getElementById("filter-time").value, 10) || 60;
   const driverVal = document.getElementById("filter-driver").value || "all";
   const showPaid = document.getElementById("filter-show-paid").checked;
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const fromTime = periodStart(document.getElementById("filter-from").value);
+  const toTime = periodEnd(document.getElementById("filter-to").value);
 
   let paidHidden = 0;
   const filtered = reportsCache.filter(function (r) {
-    if (reportStamp(r) < cutoff) return false;
+    const stamp = reportStamp(r);
+    if (fromTime !== null && stamp < fromTime) return false;
+    if (toTime !== null && stamp > toTime) return false;
     if (driverVal !== "all" && String(r.driver || "").toLowerCase() !== driverVal.toLowerCase()) return false;
     if (Number(r.paid) && !showPaid) { paidHidden++; return false; }
     return true;
@@ -3705,7 +3845,12 @@ function saveCar() {
 applyTheme();
 show("screen-cars");
 loadCars();
-document.getElementById("filter-time").addEventListener("change", renderReportsList);
+
+// Фильтр отчётов по датам: два календаря «с какого по какое число».
+reportFromField = initDateField("filter-from", onReportPeriodChange, true);
+reportToField = initDateField("filter-to", onReportPeriodChange, true);
+setReportPeriod(60, true);   // по умолчанию - последние 2 месяца
+
 document.getElementById("filter-driver").addEventListener("change", renderReportsList);
 document.getElementById("filter-show-paid").addEventListener("change", renderReportsList);
 
