@@ -129,14 +129,14 @@
     background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line);
     min-height: 48px; font-weight: 500;
   }
-  /* Маленькая кнопка «Звіт» на главной: по размеру текста, слева. Зона нажатия чуть шире самой кнопки. */
+  /* Маленькая кнопка «Отчёт» на главной: по размеру текста, слева. Зона нажатия чуть шире самой кнопки. */
   #btn-main-3 {
     position: relative; display: block; width: auto;
     min-height: 36px; padding: 6px 16px; margin: 0 0 12px;
     font-size: 14px; border-radius: 10px;
   }
   #btn-main-3::after { content: ""; position: absolute; inset: -4px; }
-  /* Ряд верхних кнопок: «Звіт» и «Затраты» стоят рядом и одинакового размера. */
+  /* Ряд верхних кнопок: «Отчёт» и «Затраты» стоят рядом и одинакового размера. */
   .top-row { display: flex; flex-wrap: nowrap; gap: 8px; margin: 0 0 12px; }
   .top-row #btn-main-3,
   .top-row #btn-costs {
@@ -205,7 +205,7 @@
     background: transparent; border: 0; border-radius: 0;
     accent-color: var(--btn);
   }
-  /* Чекбокс оплати звіту: чорний квадрат з акцентною рамкою, як у решті UI. */
+  /* Чекбокс оплаты отчёта: чёрный квадрат с акцентной рамкой, как у всего UI. */
   .paid-check {
     display: inline-flex; align-items: center; justify-content: center;
     width: 22px; height: 22px; min-height: 22px;
@@ -382,7 +382,7 @@
   padding: 14px; color: var(--hint); font-size: 14px; text-align: center;
 }
 
-/* ---------- Общий combobox (.combo): Водій, Замовник, «Що робили» ---------- */
+/* ---------- Общий combobox (.combo): Водитель, Заказчик, «Что делали» ---------- */
 .combo { position: relative; display: block; width: 100%; }
 .combo input[role="combobox"] { padding-right: 56px; }
 .combo-row { display: flex; gap: 14px; align-items: stretch; margin-top: 8px; position: relative; }
@@ -458,7 +458,7 @@
   opacity: 1; visibility: visible; pointer-events: auto;
   transform: translateY(0);
 }
-/* Прокручивается только эта часть: пункт «+ Додати» снизу всегда на виду. */
+/* Прокручивается только эта часть: пункт «+ Добавить» снизу всегда на виду. */
 .suggest-items {
   max-height: 188px; overflow-y: auto; overflow-x: hidden;
   padding: 4px 0; overscroll-behavior: contain;
@@ -645,7 +645,7 @@
     font-size: 14px;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-/* --- Фільтри на екрані "Всі звіти" --- */
+/* --- Фильтры на экране "Все отчёты" --- */
 .filters-bar { padding: 8px 0; margin: 0 0 12px; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filter-label { color: var(--hint); font-size: 12px; font-weight: 500; margin-right: 4px; white-space: nowrap; }
@@ -664,7 +664,7 @@
 
 <div id="screen-cars">
   <div class="top-row">
-    <button class="btn-secondary" id="btn-main-3" onclick="openReportFromMain()">Звіт</button>
+    <button class="btn-secondary" id="btn-main-3" onclick="openReportFromMain()">Отчёт</button>
     <button class="btn-secondary" id="btn-costs" onclick="showCosts()">
       <span>Затраты</span><span class="costs-amount" id="costs-amount"></span>
     </button>
@@ -798,7 +798,7 @@
            autocomplete="off" placeholder="например: 30…">
     <div class="err" id="barrel-error" role="alert"></div>
     <button class="btn-primary" id="b-fill" style="margin-top:14px"
-            onclick="saveBarrel('fill')">⛽ Завти авто</button>
+            onclick="saveBarrel('fill')">⛽ Заправить авто</button>
   </div>
   <div class="card" id="barrel-amount-card">
     <div class="barrel-part-title">🛢 Пополнение и убавление</div>
@@ -844,7 +844,7 @@
 
 <div id="screen-report-form" class="hidden">
   <button class="back" onclick="backToReports()">← Назад</button>
-  <h1>Звіт</h1>
+  <h1>Отчёт</h1>
   <div class="card">
     <div id="report-form-fields"></div>
   </div>
@@ -852,30 +852,30 @@
 
 <div id="screen-reports-list" class="hidden">
   <button class="back" onclick="backToCars()">← Назад</button>
-  <h1>Всі звіти</h1>
+  <h1>Все отчёты</h1>
   <div class="filters-bar">
     <div class="filter-row">
       <label class="filter-label" for="filter-time">Час</label>
       <select id="filter-time" class="filter-select">
-        <option value="7">1 тиждень</option>
-        <option value="14">2 тижні</option>
-        <option value="21">3 тижні</option>
-        <option value="30">1 місяць</option>
-        <option value="60" selected>2 місяці</option>
+        <option value="7">1 неделя</option>
+        <option value="14">2 недели</option>
+        <option value="21">3 недели</option>
+        <option value="30">1 месяц</option>
+        <option value="60" selected>2 месяца</option>
       </select>
-      <label class="filter-label" for="filter-driver">Водій</label>
+      <label class="filter-label" for="filter-driver">Водитель</label>
       <select id="filter-driver" class="filter-select">
-        <option value="all">Всі</option>
+        <option value="all">Все</option>
       </select>
     </div>
-    <label class="show-paid-row"><span class="paid-check"><input type="checkbox" id="filter-show-paid"></span>Показати оплачені</label>
+    <label class="show-paid-row"><span class="paid-check"><input type="checkbox" id="filter-show-paid"></span>Показать оплаченные</label>
   </div>
   <div id="reports-list-body" class="card" role="status" aria-live="polite"></div>
   <div class="filters-bar" style="margin-top:12px; border-top: 1px solid var(--line); padding-top: 8px;">
-    <div class="stat">Всього: <span id="reports-count">0</span> звітів, сумарно: <span id="total-mileage">0</span> км</div>
+    <div class="stat">Всього: <span id="reports-count">0</span> отчётов, суммарно: <span id="total-mileage">0</span> км</div>
   </div>
-  <button class="btn-secondary" style="margin-top:12px" onclick="downloadAllReports()">⬇️ Скачати всі звіти</button>
-  <div class="hint">Оплачені звіти зникають зі списку, але лишаються в архіві й потрапляють у файл.</div>
+  <button class="btn-secondary" style="margin-top:12px" onclick="downloadAllReports()">⬇️ Скачать все отчёты</button>
+  <div class="hint">Оплаченные отчёты исчезают из списка, но остаются в архиве и попадают в файл.</div>
 
   <div id="report-drivers-list"></div>
   <div id="report-customers-list"></div>
@@ -1055,7 +1055,7 @@ function api(path, options) {
       try { data = JSON.parse(raw); } catch (error) { data = null; }
       if (data === null || typeof data !== "object") {
         throw new Error(method + " " + path + ": сервер повернув " + response.status +
-          " замість JSON (такого адреса на сервері немає або метод не дозволений)");
+          " вместо JSON (такого адреса на сервере нет или метод не разрешён)");
       }
       if (!response.ok || data.ok === false) {
         throw new Error(data.error || "ошибка " + response.status);
@@ -1074,7 +1074,7 @@ function toast(text) {
   setTimeout(function () { box.classList.remove("show"); }, 2200);
 }
 
-// ----- Общий выпадающий список (combobox): Водій, Замовник, «Що робили» -----
+// ----- Общий выпадающий список (combobox): Водитель, Заказчик, «Что делали» -----
 // Один компонент на все три поля. Данные и правила задаёт конфиг createCombo().
 
 const comboRegistry = [];   // списки текущей формы: чистим при смене формы
@@ -1093,7 +1093,7 @@ function comboHtml(id, placeholder) {
     '<input id="' + id + '" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ' +
       'role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" ' +
       'aria-controls="' + id + '-list" placeholder="' + esc(placeholder) + '">' +
-    '<button type="button" class="combo-arrow" tabindex="-1" aria-label="Показати список">▾</button>' +
+    '<button type="button" class="combo-arrow" tabindex="-1" aria-label="Показать список">▾</button>' +
     '<div class="suggest-list" id="' + id + '-list" role="listbox"></div>' +
   '</div>';
 }
@@ -1246,10 +1246,10 @@ function createCombo(cfg) {
 
     let html = '<div class="suggest-items">';
     if (!st.rows.length) {
-      let text = "Нічого не знайдено";
-      if (!st.loaded) text = "Завантажую…";
-      else if (st.failed && !st.items.length) text = "Не вдалося завантажити список";
-      else if (!st.items.length) text = "Список порожній";
+      let text = "Ничего не найдено";
+      if (!st.loaded) text = "Загружаю…";
+      else if (st.failed && !st.items.length) text = "Не удалось загрузить список";
+      else if (!st.items.length) text = "Список пуст";
       html += '<div class="suggest-empty">' + esc(text) + "</div>";
     }
     st.rows.forEach(function (row, i) {
@@ -1264,14 +1264,14 @@ function createCombo(cfg) {
     if (st.adding) {
       html += '<div class="suggest-add-inline">' +
         '<input class="suggest-add-input" type="text" maxlength="80" autocomplete="off" placeholder="' +
-          esc(cfg.addPlaceholder || "Нова назва") + '">' +
-        '<button type="button" class="btn-save-add">Зберегти</button>' +
-        '<button type="button" class="btn-cancel-add" aria-label="Скасувати">✕</button>' +
+          esc(cfg.addPlaceholder || "Новое название") + '">' +
+        '<button type="button" class="btn-save-add">Сохранить</button>' +
+        '<button type="button" class="btn-cancel-add" aria-label="Отменить">✕</button>' +
         "</div>";
     } else {
       const typed = q && !findExact(q);
       html += '<button type="button" class="suggest-add">' +
-        esc(typed ? "+ Додати «" + q + "»" : cfg.addLabel) + "</button>";
+        esc(typed ? "+ Добавить «" + q + "»" : cfg.addLabel) + "</button>";
     }
     html += "</div>";
     list.innerHTML = html;
@@ -1350,7 +1350,7 @@ function createCombo(cfg) {
     if (!name) {
       const field = addInput();
       if (field) field.focus();
-      toast("Введіть назву");
+      toast("Введите название");
       return;
     }
     const dup = findExact(name);
@@ -1366,9 +1366,9 @@ function createCombo(cfg) {
         }
       }
       pick(known || item);
-      toast(cfg.addedMessage || "Додано");
+      toast(cfg.addedMessage || "Добавлено");
     }).catch(function (error) {
-      toast((error && error.message) || "Не вдалося додати");
+      toast((error && error.message) || "Не удалось добавить");
     }).then(function () {
       st.saving = false;
     });
@@ -1707,7 +1707,7 @@ function openCar(carId) {
       '</div>' +
       nextServiceHtml(car);
     show("screen-car");
-    // Выгрузка — для супер-адміна (рівень 3), бочка — для повного доступу (рівень 2)
+    // Выгрузка — для супер-админа (уровень 3), бочка — для полного доступа (уровень 2)
     const downloadBtn = document.getElementById("car-download-history");
     if (downloadBtn && data.level >= 3) downloadBtn.classList.remove("hidden");
     const barrelBtn = document.getElementById("car-fill-barrel");
@@ -2138,18 +2138,18 @@ function totalSpent(car) {
 
 // Карточка «Бочка» на главном экране: два вида топлива и остаток.
 function renderBarrelMenu() {
-  // Кнопка очистки історії бочки — лише у повного доступу (рівень 2).
+  // Кнопка очистки истории бочки — только у полного доступа (уровень 2).
   const clearBtn = document.getElementById("b-clear-history");
   if (clearBtn) clearBtn.classList.toggle("hidden", userLevel < 2);
-  // Скачати історію — лише у супер-адміна (рівень 3).
+  // Скачать историю — только у супер-админа (уровень 3).
   const downloadBtn = document.getElementById("b-download-history");
   if (downloadBtn) downloadBtn.classList.toggle("hidden", userLevel < 3);
-  // Кнопка «Звіт» на головному екрані — лише у супер-адміна (рівень 3).
+  // Кнопка «Отчёт» на главном экране — только у супер-админа (уровень 3).
   const btn2 = document.getElementById("btn-main-2");
   if (btn2) btn2.classList.toggle("hidden", userLevel < 3);
   const box = document.getElementById("barrel-box");
   if (!box) return;
-  // Бочка видна лише у повного доступу (рівень 2) і вище.
+  // Бочка видна только у полного доступа (уровень 2) и выше.
   box.classList.toggle("hidden", userLevel < 2);
   box.innerHTML =
     '<div class="card barrel-card">' +
@@ -2168,7 +2168,7 @@ function renderBarrelMenu() {
 // Остаток в бочке — вместе со списком машин.
 function loadBarrelMenu() {
   renderBarrelMenu();
-  // Остаток в бочке грузим только для адміністратора повного доступу (уровень 2).
+  // Остаток в бочке грузим только для администратора полного доступа (уровень 2).
   if (userLevel < 2) {
     barrelBalance = null;
     renderBarrelMenu();
@@ -2480,29 +2480,29 @@ const SERVICE_SUGGESTIONS = [
   "Химчистка салона",
 ];
 
-// Підказки для поля «Замовник» у звітах.
+// Подсказки для поля «Заказчик» в отчётах.
 const CLIENT_SUGGESTIONS = [
-  "Клієнт 1",
-  "Клієнт 2",
-  "Клієнт 3",
-  "Клієнт 4",
-  "Клієнт 5",
-  "Підприємство А",
-  "Підприємство Б",
+  "Клиент 1",
+  "Клиент 2",
+  "Клиент 3",
+  "Клиент 4",
+  "Клиент 5",
+  "Предприятие А",
+  "Предприятие Б",
   "ТОВ Рома",
-  "ФОП Іванов",
+  "ФОП Иванов",
 ];
 
-// Підказки для поля «Водій» у звітах.
+// Подсказки для поля «Водитель» в отчётах.
 const DRIVER_SUGGESTIONS = [
-  "Водій 1",
-  "Водій 2",
-  "Водій 3",
-  "Водій 4",
-  "Водій 5",
-  "Іван Петренко",
-  "Петро Іванов",
-  "Олексій Ковальчук",
+  "Водитель 1",
+  "Водитель 2",
+  "Водитель 3",
+  "Водитель 4",
+  "Водитель 5",
+  "Иван Петренко",
+  "Петр Иванов",
+  "Алексей Ковальчук",
   "Микола Шевчук",
 ];
 
@@ -2648,12 +2648,12 @@ function highlight(text, query) {
   return result;
 }
 
-// ---------- форма звіта ----------
+// ---------- форма отчёта ----------
 
-// ---------- форма звіта ----------
-// ----- Календар в стилі сайту (замість системного, який не стилізується) -----
-const CAL_MONTHS = ["Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
-  "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"];
+// ---------- форма отчёта ----------
+// ----- Календар в стиле сайта (вместо системного, который не стилизуется) -----
+const CAL_MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const CAL_DOW = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
 
 function parseIsoDate(s) {
@@ -2661,7 +2661,7 @@ function parseIsoDate(s) {
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
 }
 
-// Значення зберігається в прихованому полі #id як «ГГГГ-ММ-ДД»; на екрані — «ДД.ММ.ГГГГ».
+// Значение сохраняется в скрытом поле #id как «ГГГГ-ММ-ДД»; на экране — «ДД.ММ.ГГГГ».
 function initDateField(id) {
   const hidden = document.getElementById(id);
   const box = document.getElementById(id + "-field");
@@ -2684,13 +2684,13 @@ function initDateField(id) {
   function render() {
     const y = shown.getFullYear();
     const m = shown.getMonth();
-    const lead = (new Date(y, m, 1).getDay() + 6) % 7;   // понеділок — перший
+    const lead = (new Date(y, m, 1).getDay() + 6) % 7;   // понедельник — первый
     const total = new Date(y, m + 1, 0).getDate();
     const atLimit = y * 12 + m >= todayIndex;
     let html = '<div class="cal-head">' +
-      '<button type="button" class="cal-nav" data-nav="-1" aria-label="Попередній місяць">‹</button>' +
+      '<button type="button" class="cal-nav" data-nav="-1" aria-label="Предыдущий месяц">‹</button>' +
       '<div class="cal-title">' + CAL_MONTHS[m] + " " + y + "</div>" +
-      '<button type="button" class="cal-nav" data-nav="1" aria-label="Наступний місяць"' +
+      '<button type="button" class="cal-nav" data-nav="1" aria-label="Следующий месяц"' +
         (atLimit ? " disabled" : "") + ">›</button></div>" +
       '<div class="cal-grid">';
     CAL_DOW.forEach(function (name) { html += '<div class="cal-dow">' + name + "</div>"; });
@@ -2780,25 +2780,25 @@ function showReportForm(carId) {
   disposeCombos();
   document.getElementById("report-form-fields").innerHTML =
     '<div class="combo-row">' +
-      '<label for="report-driver-input">Водій</label>' +
-      comboHtml("report-driver-input", "Виберіть або додайте водія") +
+      '<label for="report-driver-input">Водитель</label>' +
+      comboHtml("report-driver-input", "Выберите или добавьте водителя") +
     '</div>' +
     '<div class="combo-row">' +
-      '<label for="report-client-input">Замовник</label>' +
-      comboHtml("report-client-input", "Виберіть або додайте замовника") +
+      '<label for="report-client-input">Заказчик</label>' +
+      comboHtml("report-client-input", "Выберите или добавьте заказчика") +
     '</div>' +
     '<div class="combo-row">' +
-      '<label for="report-mileage-input">Кілометраж</label>' +
+      '<label for="report-mileage-input">Пробег</label>' +
       '<input id="report-mileage-input" name="mileage" type="number" inputmode="numeric" ' +
         'autocomplete="off" placeholder="наприклад: 121800">' +
     '</div>' +
     '<div class="combo-row">' +
-      '<label for="report-date-input-view">Дата звіту</label>' +
+      '<label for="report-date-input-view">Дата отчёта</label>' +
       '<div class="datefield" id="report-date-input-field">' +
         '<input type="hidden" id="report-date-input" value="' + localDateStr(new Date()) + '">' +
         '<input type="text" id="report-date-input-view" readonly autocomplete="off" ' +
-          'role="combobox" aria-haspopup="dialog" aria-expanded="false" placeholder="Оберіть дату">' +
-        '<button type="button" class="datefield-btn" tabindex="-1" aria-label="Відкрити календар">' +
+          'role="combobox" aria-haspopup="dialog" aria-expanded="false" placeholder="Выберите дату">' +
+        '<button type="button" class="datefield-btn" tabindex="-1" aria-label="Открыть календарь">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
           'stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>' +
           '<path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
@@ -2807,8 +2807,8 @@ function showReportForm(carId) {
     '</div>' +
     '<div class="err" id="report-form-error" role="alert"></div>' +
     '<button class="btn-primary" id="report-save" style="margin-top:18px" ' +
-      'onclick="saveReport()">Добавить звіт</button>' +
-    '<button class="btn-secondary" style="margin-top:8px" onclick="showAllReports()">Всі звіти</button>';
+      'onclick="saveReport()">Добавить отчёт</button>' +
+    '<button class="btn-secondary" style="margin-top:8px" onclick="showAllReports()">Все отчёты</button>';
   show("screen-report-form");
   initDateField("report-date-input");
 
@@ -2816,9 +2816,9 @@ function showReportForm(carId) {
     id: "report-driver-input",
     match: "word-start",
     sort: true,
-    addLabel: "+ Додати водія",
-    addPlaceholder: "Прізвище та ім’я водія",
-    addedMessage: "Водія додано",
+    addLabel: "+ Добавить водителя",
+    addPlaceholder: "Фамилия и имя водителя",
+    addedMessage: "Водитель добавлен",
     load: function () {
       return api("/api/drivers").then(function (data) { return comboListFrom(data, "drivers"); });
     },
@@ -2829,9 +2829,9 @@ function showReportForm(carId) {
     id: "report-client-input",
     match: "contains",
     sort: true,
-    addLabel: "+ Додати замовника",
-    addPlaceholder: "Назва замовника",
-    addedMessage: "Замовника додано",
+    addLabel: "+ Добавить заказчика",
+    addPlaceholder: "Название заказчика",
+    addedMessage: "Заказчик добавлен",
     load: function () {
       return api("/api/customers").then(function (data) { return comboListFrom(data, "customers"); });
     },
@@ -2845,24 +2845,24 @@ function saveReport() {
   const clientText = document.getElementById("report-client-input").value.trim();
   const dateVal = (document.getElementById("report-date-input").value || "").trim();
 
-  if (!driverText) { showError("Введіть водія"); return; }
-  if (!clientText) { showError("Введіть замовника"); return; }
-  if (isNaN(mileage) || mileage <= 0) { showError("Кілометраж має бути більше 0"); return; }
-  if (!dateVal) { showError("Вкажіть дату звіту"); return; }
-  if (dateVal > localDateStr(new Date())) { showError("Дата не може бути в майбутньому"); return; }
+  if (!driverText) { showError("Введите водителя"); return; }
+  if (!clientText) { showError("Введите заказчика"); return; }
+  if (isNaN(mileage) || mileage <= 0) { showError("Пробег должен быть больше 0"); return; }
+  if (!dateVal) { showError("Укажите дату отчёта"); return; }
+  if (dateVal > localDateStr(new Date())) { showError("Дата не может быть в будущем"); return; }
 
   const button = document.getElementById("report-save");
-  setBusy(button, true, "Зберігаю…");
+  setBusy(button, true, "Сохраняю…");
   Promise.all([window.comboDriver.resolveItem(), window.comboCustomer.resolveItem()])
     .then(function (found) {
       const driver = found[0];
       const client = found[1];
       if (!driver) {
-        showError("Водія немає в списку: оберіть його або натисніть «+ Додати водія»");
+        showError("Водителя нет в списке: выберите его или нажмите «+ Добавить водителя»");
         return null;
       }
       if (!client) {
-        showError("Замовника немає в списку: оберіть його або натисніть «+ Додати замовника»");
+        showError("Заказчика нет в списке: выберите его или нажмите «+ Добавить заказчика»");
         return null;
       }
       // Бэкенд хранит имена (driver, customer). Остальные ключи (client, *_id) — про запас,
@@ -2878,20 +2878,20 @@ function saveReport() {
         customer_id: client.id,
         client_id: client.id
       }) }).then(function (data) {
-        toast(data.message || "Звіт додано");
+        toast(data.message || "Отчёт добавлен");
         hideReportForm();
         showAllReports();
       });
     })
     .catch(function (error) {
-      showError(error.message || "Помилка при збереженні");
+      showError(error.message || "Ошибка при сохранении");
     })
     .then(function () {
       setBusy(button, false);
     });
 }
 
-// Водії та замовники для екрана «Всі звіти».
+// Водители и заказчики для экрана «Все отчёты».
 let reportDrivers = [];
 let reportCustomers = [];
 
@@ -2914,20 +2914,20 @@ function loadReportCustomers() {
 function askDeleteDriver(driverId) {
   const found = reportDrivers.filter(function (d) { return Number(d.id) === Number(driverId); })[0];
   const name = found ? found.name : "";
-  openModal("Видалити водія?",
-    "Ви дійсно хочете видалити водія «" + name + "»?",
+  openModal("Удалить водителя?",
+    "Вы действительно хотите удалить водителя «" + name + "»?",
     function () { deleteDriver(driverId, name); },
-    "Видалити"
+    "Удалить"
   );
 }
 
 function askDeleteCustomer(customerId) {
   const found = reportCustomers.filter(function (d) { return Number(d.id) === Number(customerId); })[0];
   const name = found ? found.name : "";
-  openModal("Видалити замовника?",
-    "Ви дійсно хочете видалити замовника «" + name + "»?",
+  openModal("Удалить заказчика?",
+    "Вы действительно хотите удалить заказчика «" + name + "»?",
     function () { deleteCustomer(customerId, name); },
-    "Видалити"
+    "Удалить"
   );
 }
 
@@ -2935,11 +2935,11 @@ function deleteDriver(driverId, driverName) {
   api("/api/drivers/" + driverId, { method: "DELETE" })
     .then(function (data) {
       haptic();
-      toast(data.message || "Водія видалено");
+      toast(data.message || "Водитель удалён");
       showAllReports();
     })
     .catch(function (error) {
-      toast("Не вдалося видалити: " + error.message);
+      toast("Не удалось удалить: " + error.message);
     });
 }
 
@@ -2947,18 +2947,18 @@ function deleteCustomer(customerId, customerName) {
   api("/api/customers/" + customerId, { method: "DELETE" })
     .then(function (data) {
       haptic();
-      toast(data.message || "Замовника видалено");
+      toast(data.message || "Заказчик удалён");
       showAllReports();
     })
     .catch(function (error) {
-      toast("Не вдалося видалити: " + error.message);
+      toast("Не удалось удалить: " + error.message);
     });
 }
 
-// Звіти з сервера лежать тут: фільтри працюють по ним без нового запиту.
+// Отчёты с сервера лежат тут: фильтры работают по ним без нового запроса.
 let reportsCache = [];
 
-// Список водіїв у фільтрі. Вибраний водій НЕ скидається; якщо його видалили — «Всі».
+// Список водителей в фильтре. Выбранный водитель НЕ сбрасывается; если его удалили — «Все».
 function fillDriverFilter() {
   const select = document.getElementById("filter-driver");
   if (!select) return;
@@ -2966,7 +2966,7 @@ function fillDriverFilter() {
   select.innerHTML = "";
   const all = document.createElement("option");
   all.value = "all";
-  all.textContent = "Всі";
+  all.textContent = "Все";
   select.appendChild(all);
   reportDrivers.forEach(function (d) {
     const opt = document.createElement("option");
@@ -2994,11 +2994,11 @@ function showAllReports() {
     renderCustomersList();
     show("screen-reports-list");
   }).catch(function (error) {
-    toast("Помилка завантаження звітів: " + ((error && error.message) || ""));
+    toast("Ошибка загрузки отчётов: " + ((error && error.message) || ""));
   });
 }
 
-// Фільтри: час (у днях), водій, «Показати оплачені». Оплачені за замовчуванням сховані.
+// Фильтры: время (в днях), водитель, «Показать оплаченные». Оплаченные по умолчанию скрыты.
 function renderReportsList() {
   const days = parseInt(document.getElementById("filter-time").value, 10) || 60;
   const driverVal = document.getElementById("filter-driver").value || "all";
@@ -3018,10 +3018,10 @@ function renderReportsList() {
   let listHTML = "";
   if (!filtered.length) {
     const sub = paidHidden
-      ? "Оплачені звіти (" + paidHidden + ") сховані: вони в архіві, їх можна скачати кнопкою нижче"
-      : "За поточні фільтри нічого немає";
+      ? "Оплаченные отчёты (" + paidHidden + ") сохранены: они в архиве, их можно скачать кнопкой ниже"
+      : "За текущими фильтрами ничего нет";
     listHTML = '<div class="empty"><span class="empty-ico">📋</span>' +
-      '<div class="empty-title">Звітів немає</div>' +
+      '<div class="empty-title">Отчётов нет</div>' +
       '<div class="empty-sub">' + esc(sub) + '</div></div>';
   } else {
     filtered.forEach(function (report) {
@@ -3044,7 +3044,7 @@ function renderReportsList() {
             '</label>' +
             (paid
               ? '<button type="button" class="item-del" onclick="askDeleteReport(' + Number(report.id) + ')" ' +
-                'aria-label="Видалити звіт">✕</button>'
+                'aria-label="Удалить отчёт">✕</button>'
               : '') +
           '</div>' +
         '</div>';
@@ -3061,11 +3061,11 @@ function renderReportsList() {
 function renderDriversList() {
   const box = document.getElementById("report-drivers-list");
   if (!box) return;
-  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Водії</h3>';
+  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Водители</h3>';
   if (!reportDrivers.length) {
     html += '<div class="empty" style="padding:16px"><div class="empty-ico">👤</div>' +
-      '<div class="empty-title">Водіїв немає</div>' +
-      '<div class="empty-sub">Додайте водія в формі звіту</div></div>';
+      '<div class="empty-title">Водителей нет</div>' +
+      '<div class="empty-sub">Добавьте водителя в форме отчёта</div></div>';
   } else {
     html += '<div style="display:flex; flex-direction:column; gap:8px">';
     reportDrivers.forEach(function (d) {
@@ -3075,7 +3075,7 @@ function renderDriversList() {
         '<span class="item-title">' + esc(d.name) + '</span>' +
         (canDelete
           ? '<button type="button" class="item-del" onclick="askDeleteDriver(' + Number(d.id) + ')" ' +
-            'aria-label="Видалити водія">✕</button>'
+            'aria-label="Удалить водителя">✕</button>'
           : '') +
         '</div>' +
         '</div>';
@@ -3088,11 +3088,11 @@ function renderDriversList() {
 function renderCustomersList() {
   const box = document.getElementById("report-customers-list");
   if (!box) return;
-  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Замовники</h3>';
+  let html = '<h3 style="margin:16px 0 8px; font-size:13px; color:var(--hint); text-transform:uppercase; letter-spacing:.6px;">Заказчики</h3>';
   if (!reportCustomers.length) {
     html += '<div class="empty" style="padding:16px"><div class="empty-ico">🏢</div>' +
-      '<div class="empty-title">Замовників немає</div>' +
-      '<div class="empty-sub">Додайте замовника в формі звіту</div></div>';
+      '<div class="empty-title">Заказчиков нет</div>' +
+      '<div class="empty-sub">Добавьте заказчика в форме отчёта</div></div>';
   } else {
     html += '<div style="display:flex; flex-direction:column; gap:8px">';
     reportCustomers.forEach(function (d) {
@@ -3102,7 +3102,7 @@ function renderCustomersList() {
         '<span class="item-title">' + esc(d.name) + '</span>' +
         (canDelete
           ? '<button type="button" class="item-del" onclick="askDeleteCustomer(' + Number(d.id) + ')" ' +
-            'aria-label="Видалити замовника">✕</button>'
+            'aria-label="Удалить заказчика">✕</button>'
           : '') +
         '</div>' +
         '</div>';
@@ -3112,7 +3112,7 @@ function renderCustomersList() {
   box.innerHTML = html;
 }
 
-// Поле CSV: лишні лапки та «;» екрануємо, а початок на «=», «+», «-», «@» — щоб Excel не вважав це формулою.
+// Поле CSV: лишние кавычки и «;» экранируем, а начало на «=», «+», «-», «@» — чтобы Excel не считал это формулой.
 function csvCell(value) {
   let text = String(value == null ? "" : value);
   if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
@@ -3129,29 +3129,29 @@ function downloadCsv(text, filename) {
   link.click();
   document.body.removeChild(link);
   setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-  toast("Файл збережено");
+  toast("Файл сохранён");
 }
 
-// Архів: усі звіти, разом з оплаченими, без жодних фільтрів.
+// Архив: все отчёты, вместе с оплаченными, без никаких фильтров.
 function downloadAllReports() {
   api("/api/reports").then(function (data) {
     const rows = (data.reports || []).slice().sort(function (a, b) {
       return (reportStamp(b) - reportStamp(a)) || (Number(b.id) - Number(a.id));
     });
-    if (!rows.length) { toast("Звітів немає"); return; }
-    const lines = [["Дата", "Водій", "Замовник", "Кілометраж", "Оплачено"].join(";")];
+    if (!rows.length) { toast("Отчётов нет"); return; }
+    const lines = [["Дата", "Водитель", "Заказчик", "Пробег", "Оплачено"].join(";")];
     rows.forEach(function (r) {
       lines.push([
         formatDate(r.created_at || ""),
         r.driver || "",
         r.customer || r.client || "",
         Number(r.mileage) || 0,
-        Number(r.paid) ? "Так" : "Ні"
+        Number(r.paid) ? "Так" : "Нет"
       ].map(csvCell).join(";"));
     });
     downloadCsv("﻿" + lines.join("\r\n"), "zvity_" + localDateStr(new Date()) + ".csv");
   }).catch(function (error) {
-    toast("Не вдалося скачати: " + ((error && error.message) || ""));
+    toast("Не удалось скачать: " + ((error && error.message) || ""));
   });
 }
 
@@ -3164,16 +3164,16 @@ function openReportFromMain() {
   showReportForm(currentCar);
 }
 
-// Видалити можна лише оплачений звіт. Видалення остаточне: у файлі-архіві його теж не буде.
+// Удалить можно только оплаченный отчёт. Удаление окончательное: в файле-архиве его тоже не будет.
 function askDeleteReport(reportId) {
   const report = reportsCache.filter(function (r) { return Number(r.id) === Number(reportId); })[0];
   if (!report || !Number(report.paid)) return;
   const who = report.driver || report.customer || report.client || "";
-  openModal("Видалити звіт?",
+  openModal("Удалить отчёт?",
     who + " · " + formatDate(report.created_at || "") + " · " + (Number(report.mileage) || 0) + " км\n\n" +
-    "Звіт буде видалено остаточно, у файлі з архівом його теж не буде.",
+    "Отчёт будет удалён окончательно, в файле с архивом его тоже не будет.",
     function () { deleteReport(reportId); },
-    "Видалити"
+    "Удалить"
   );
 }
 
@@ -3183,10 +3183,10 @@ function deleteReport(reportId) {
       haptic();
       reportsCache = reportsCache.filter(function (r) { return Number(r.id) !== Number(reportId); });
       renderReportsList();
-      toast(data.message || "Звіт видалено");
+      toast(data.message || "Отчёт удалён");
     })
     .catch(function (error) {
-      toast("Не вдалося видалити звіт: " + ((error && error.message) || ""));
+      toast("Не удалось удалить отчёт: " + ((error && error.message) || ""));
     });
 }
 
@@ -3201,11 +3201,11 @@ function toggleReportPaid(reportId, paid) {
         if (Number(r.id) === Number(reportId)) r.paid = paid;
       });
       renderReportsList();
-      toast(paid ? "Оплачено: звіт в архіві" : "Позначку знято");
+      toast(paid ? "Оплачено: отчёт в архиве" : "Отметка снята");
     })
     .catch(function (error) {
-      renderReportsList();   // повертаємо галочку, як було
-      toast("Помилка при оновленні: " + error.message);
+      renderReportsList();   // возвращаем галочку, как было
+      toast("Ошибка при обновлении: " + error.message);
     });
 }
 
@@ -3306,9 +3306,9 @@ function showServiceForm() {
     id: "f-description",
     match: "contains",
     sort: false,
-    addLabel: "+ Додати варіант",
-    addPlaceholder: "Що зробили",
-    addedMessage: "Варіант додано",
+    addLabel: "+ Добавить вариант",
+    addPlaceholder: "Что сделали",
+    addedMessage: "Вариант добавлен",
     load: function () { return SERVICE_SUGGESTIONS.concat(loadCustomServices()); },
     create: function (name) { saveCustomService(name); return { id: null, name: name }; }
   });

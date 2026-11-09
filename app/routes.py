@@ -26,6 +26,7 @@ from sqlalchemy import func, desc, or_
 from app import db
 from app.config import Config
 from app.db_retry import run_with_retry
+from app.i18n import normalize_lang
 from app.models import User, Vehicle, Expense, FuelBarrel, FuelInflow, FuelOutflow, AuditLog, log_audit
 from app.auth import require_auth, require_level, require_can_view_logs, require_can_clear_logs
 
@@ -1014,3 +1015,25 @@ def clear_logs():
         new_values=None,
     )
     return jsonify({"status": "cleared", "deleted": count})
+
+
+# ---------- Язык интерфейса ----------
+
+@bp.get("/language")
+@require_auth
+def get_language():
+    """Текущий язык пользователя (ru или uk)."""
+    user = g.current_user
+    return jsonify({"ok": True, "lang": getattr(user, "lang", None)})
+
+
+@bp.post("/language")
+@require_auth
+def set_language():
+    """Сохранить язык пользователя: ru или uk."""
+    data = request.get_json(silent=True) or {}
+    lang = normalize_lang(data.get("lang"))
+    user = g.current_user
+    user.lang = lang
+    db.session.commit()
+    return jsonify({"ok": True, "lang": lang})

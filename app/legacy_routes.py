@@ -962,7 +962,7 @@ def api_driver_add():
     data = request.get_json(silent=True) or {}
     name = _clean_text(data.get("name"), 50)
     if not name:
-        return _fail("дайте ім'я водія")
+        return _fail("дайте имя водителя")
     user = getattr(g, "current_user", None)
     driver = Driver(name=name, user_id=user.id if user else None)
     db.session.add(driver)
@@ -976,13 +976,13 @@ def api_driver_delete(driver_id: int):
     """Удалить водителя. Водитель, который используется в отчётах, не удаляется."""
     driver = db.session.get(Driver, driver_id)
     if driver is None:
-        return _fail("водія не знайдено", 404)
+        return _fail("водитель не найден", 404)
     used = Report.query.filter_by(driver_id=driver.id).first()
     if used is not None:
-        return _fail("водій використовується в звітах — спочатку видаліть звіти")
+        return _fail("водитель используется в отчётах — сначала удалите отчёты")
     db.session.delete(driver)
     db.session.commit()
-    return jsonify({"ok": True, "message": "Водій видалений"})
+    return jsonify({"ok": True, "message": "Водитель удалён"})
 
 
 @bp.get("/customers")
@@ -1008,7 +1008,7 @@ def api_customer_add():
     data = request.get_json(silent=True) or {}
     name = _clean_text(data.get("name"), 50)
     if not name:
-        return _fail("дайте ім'я замовника")
+        return _fail("дайте имя заказчика")
     customer = Customer(name=name)
     db.session.add(customer)
     db.session.commit()
@@ -1021,13 +1021,13 @@ def api_customer_delete(customer_id: int):
     """Удалить заказчика. Заказчик, который используется в отчётах, не удаляется."""
     customer = db.session.get(Customer, customer_id)
     if customer is None:
-        return _fail("замовника не знайдено", 404)
+        return _fail("заказчик не найден", 404)
     used = Report.query.filter_by(customer_id=customer.id).first()
     if used is not None:
-        return _fail("замовник використовується в звітах — спочатку видаліть звіти")
+        return _fail("заказчик используется в отчётах — сначала удалите отчёты")
     db.session.delete(customer)
     db.session.commit()
-    return jsonify({"ok": True, "message": "Замовника видалений"})
+    return jsonify({"ok": True, "message": "Заказчик удалён"})
 
 
 @bp.get("/barrel")
@@ -1038,7 +1038,7 @@ def api_barrel_list():
     Доступна у менеджера и выше (уровень 2).
     """
     if not _is_full_admin(_level()):
-        return _fail("бочка доступна лише у адміністратора повного доступу", 403)
+        return _fail("бочка доступна только у администратора полного доступа", 403)
     return jsonify(
         {
             "ok": True,
@@ -1062,7 +1062,7 @@ def api_barrel_add():
         return _fail("выберите дизель или бензин")
 
     if not _is_full_admin(_level()):
-        return _fail("бочка доступна лише у адміністратора повного доступу", 403)
+        return _fail("бочка доступна только у администратора полного доступа", 403)
 
     action = _clean_text(data.get("action"), 20).lower() or "fill"
     if action not in BARREL_ACTIONS:
@@ -1124,7 +1124,7 @@ def api_barrel_add():
 def api_barrel_clear():
     """Очистить историю бочки."""
     if not _is_full_admin(_level()):
-        return _fail("очищати історію бочки може лише адміністратор повного доступу", 403)
+        return _fail("очищать историю бочки может только администратор полного доступа", 403)
     removed = len(_barrel_rows())
     for record in FuelInflow.query.all():
         db.session.delete(record)
@@ -1138,7 +1138,7 @@ def api_barrel_clear():
             "ok": True,
             "removed": removed,
             "balance": _barrel_balance(),
-            "message": "Історію бочки очищено",
+            "message": "Историю бочки очищено",
         }
     )
 
@@ -1235,7 +1235,7 @@ def api_report_summary():
     Доступно у суперадмина (уровень 3).
     """
     if not _is_super_admin(_level()):
-        return _fail("отчёт доступен тільки супер-адміну", 403)
+        return _fail("отчёт доступен только супер-админу", 403)
 
     fuel_type = _clean_text(request.args.get("fuel_type"), 20).lower()
     if fuel_type and fuel_type not in BARREL_TYPES:
@@ -1334,7 +1334,7 @@ def api_report():
     Доступно у суперадмина (уровень 3).
     """
     if not _is_super_admin(_level()):
-        return _fail("вигружати історію може лише супер-адмін", 403)
+        return _fail("выгружать историю может только супер-админ", 403)
 
     vehicle_id = request.args.get("car_id", type=int)
     barrel = _clean_text(request.args.get("barrel"), 20).lower()
@@ -1422,16 +1422,16 @@ def api_report_add():
     paid = data.get("paid", 0)
 
     if driver_id is None or customer_id is None or mileage is None:
-        return _fail("недостаткові дані")
+        return _fail("недостаточно данных")
 
     driver = db.session.get(Driver, driver_id)
     customer = db.session.get(Customer, customer_id)
     if driver is None or customer is None:
-        return _fail("недостаткові дані")
+        return _fail("недостаточно данных")
 
     mileage_value = _whole_number(mileage)
     if mileage_value is None:
-        return _fail("недостаткові дані")
+        return _fail("недостаточно данных")
 
     report = Report(
         vehicle_id=data.get("vehicle_id"),
@@ -1454,10 +1454,10 @@ def api_report_delete(report_id: int):
     """Удалить отчёт."""
     report = db.session.get(Report, report_id)
     if report is None:
-        return _fail("звіт не знайдено", 404)
+        return _fail("отчёт не найден", 404)
     db.session.delete(report)
     db.session.commit()
-    return jsonify({"ok": True, "message": "Звіт видалено"})
+    return jsonify({"ok": True, "message": "Отчёт удалён"})
 
 
 @bp.patch("/reports/<int:report_id>/paid")
@@ -1466,7 +1466,7 @@ def api_report_paid(report_id: int):
     """Отметить отчёт оплаченным или снять отметку."""
     report = db.session.get(Report, report_id)
     if report is None:
-        return _fail("звіт не знайдено", 404)
+        return _fail("отчёт не найден", 404)
     data = request.get_json(silent=True) or {}
     paid = data.get("paid", True)
     report.paid = bool(paid)

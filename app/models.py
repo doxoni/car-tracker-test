@@ -24,6 +24,9 @@ class User(db.Model):
     username = db.Column(db.String(120), unique=True, nullable=True)
     level = db.Column(db.Integer, default=1)  # 1=user, 2=operator, 3=super_admin
     is_whitelisted = db.Column(db.Boolean, default=False)
+    # Язык интерфейса: ru или uk. Выбирается в боте (/language) и в Mini App.
+    # None - язык ещё не выбран (при первом входе показываем выбор).
+    lang = db.Column(db.String(2), nullable=True, default=None)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Связи
