@@ -46,7 +46,13 @@ def _init_db(app, attempts: int = 10, delay: float = 5.0):
                 ensure_schema(app)
             return
         except OperationalError as e:
-            print(f"⚠️ БД недоступна (попытка {attempt}/{attempts}): {e}")
+            # Печать может упасть на консоли Windows (кодировка cp1251),
+            # а из-за этого не будет видно настоящей ошибки. Поэтому
+            # печатаем осторожно.
+            try:
+                print(f"⚠️ БД недоступна (попытка {attempt}/{attempts}): {e}")
+            except Exception:
+                pass
             if attempt == attempts:
                 raise
             time.sleep(delay)

@@ -92,3 +92,7 @@ TEST_БОТ_ТОКЕН.txt
 .neon
 .env.local
 .claude/settings.local.json
+
+# Скриншоты проверки интерфейса и рабочие копии агентов
+.shots/
+.claude/worktrees/
