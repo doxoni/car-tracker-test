@@ -113,6 +113,11 @@ def read_render_env() -> dict:
 
     Сначала берёмся из render_env.txt (KEY=VALUE), потом - из локального
     .env проекта. Значения нигде не печатаются.
+
+    TELEGRAM_TOKEN из .env не берём: файл .env может содержать старый
+    отозванный токен, и тогда деплой затрёт им рабочий токен, заданный
+    в панели Render, - бот перестанет отвечать. Токен бота ставится
+    только из render_env.txt (см. tools/set_bot_token.py).
     """
     values = {}
     env_file = ROOT / "render_env.txt"
@@ -125,7 +130,7 @@ def read_render_env() -> dict:
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
 
-    # Локальный .env - чтобы токен бота не пришлось вписывать дважды.
+    # Локальный .env - чтобы настройки не пришлось вписывать дважды.
     dotenv_file = ROOT / ".env"
     if dotenv_file.exists():
         for line in dotenv_file.read_text(encoding="utf-8-sig", errors="replace").splitlines():
@@ -135,6 +140,9 @@ def read_render_env() -> dict:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip().strip('"').strip("'")
+            if key == "TELEGRAM_TOKEN":
+                # Токен бота - только из render_env.txt, см. docstring.
+                continue
             if value and key not in values:
                 values[key] = value
 
@@ -146,6 +154,24 @@ def read_render_env() -> dict:
         "OPEN_ACCESS",
     )
     return {k: v for k, v in values.items() if k in allowed}
+
+
+def check_token(token: str) -> bool:
+    """Проверить токен бота у Telegram (getMe).
+
+    Нужно, чтобы деплой не поставил сервису заведомо нерабочий токен:
+    с ним бот не отвечает, а Mini App отдаёт 401 на все запросы.
+    """
+    if not token:
+        return False
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{token}/getMe", timeout=30
+        )
+        data = response.json()
+    except Exception:  # noqa: BLE001 - сеть может быть недоступна
+        return False
+    return bool(data.get("ok"))
 
 
 def api(method: str, path: str, key: str, payload=None):
@@ -263,15 +289,44 @@ def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
         return False
 
 
+def get_env_vars(service_id: str, key: str) -> dict:
+    """Текущие переменные окружения сервиса (ключ -> значение).
+
+    Нужно перед обновлением: PUT /env-vars в Render ЗАМЕНЯЕТ весь список
+    переменных, а не дополняет его. Без этого шага деплой стирал бы
+    всё, что задано вручную в панели Render.
+    """
+    result = {}
+    try:
+        data = api("GET", f"/services/{service_id}/env-vars", key)
+    except SystemExit:
+        return result
+    items = data if isinstance(data, list) else data.get("envVar", [])
+    for item in items:
+        env = item.get("envVar") if isinstance(item, dict) else None
+        if not isinstance(env, dict):
+            continue
+        env_key = env.get("key")
+        if env_key:
+            result[env_key] = env.get("value") or ""
+    return result
+
+
 def set_env(service_id: str, key: str, values: dict):
     """Обновить переменные окружения сервиса.
 
-    Render принимает список переменных одним запросом PUT. Значения
-    помечаются как secret - в ответе API они не возвращаются.
+    Render принимает список переменных одним запросом PUT, причём
+    ЗАМЕНЯЕТ весь список - переменные, которых нет в payload, пропадают.
+    Поэтому сначала читаем текущие переменные и накладываем новые
+    поверх них: всё, что задано вручную в панели Render, сохраняется.
+
+    Значения помечаются как secret - в ответе API они не возвращаются.
     """
+    merged = get_env_vars(service_id, key)
+    merged.update(values)
     payload = [
         {"key": env_key, "value": env_value, "type": "secret"}
-        for env_key, env_value in values.items()
+        for env_key, env_value in merged.items()
     ]
     api("PUT", f"/services/{service_id}/env-vars", key, payload)
     for env_key in values:
@@ -405,12 +460,25 @@ def main():
         "BOT_ENABLED": "1",
     }
     values.update(extra)
+
+    # Токен бота проверяем до постановки: нерабочий токен ломает и бота,
+    # и Mini App (подпись initData не сойдётся). Если токен не проходит
+    # проверку - не ставим его и предупреждаем: переменная на сервере
+    # останется прежней (set_env сохраняет те, которых нет в values).
+    token = values.get("TELEGRAM_TOKEN")
+    if token:
+        if check_token(token):
+            print("  Токен бота рабочий.")
+        else:
+            print("⚠️  Токен бота не проходит проверку Telegram - не ставлю его.")
+            print("   Возьми новый токен у @BotFather и запусти set_bot_token.cmd")
+            values.pop("TELEGRAM_TOKEN")
     set_env(service_id, key, values)
 
-    if "TELEGRAM_TOKEN" not in extra:
+    if "TELEGRAM_TOKEN" not in values:
         print("")
-        print("⚠️  TELEGRAM_TOKEN не найден - бот на Render не запустится.")
-        print("   Положи токен в файл render_env.txt (см. render_env.example.txt).")
+        print("⚠️  TELEGRAM_TOKEN не задан - бот на Render не ответит.")
+        print("   Возьми токен у @BotFather и запусти set_bot_token.cmd.")
 
     trigger_deploy(service_id, key)
 

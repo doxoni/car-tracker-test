@@ -19,6 +19,13 @@ from flask import request, g, jsonify
 from app.config import Config
 from app import db
 
+# Тексты ошибок доступа. Раньше здесь стояли английские коды
+# ("unauthorized", "forbidden") - пользователь видел их в Mini App
+# без всякого объяснения. Теперь это понятные фразы, которые ещё и
+# переводятся на украинский (словарь app/i18n_dict.py).
+ERROR_NO_ACCESS = "нет доступа"
+ERROR_NO_RIGHTS = "недостаточно прав"
+
 
 def get_secret_key():
     """Секретный ключ: HMAC-SHA256("WebAppData", bot_token)."""
@@ -114,7 +121,7 @@ def require_auth(f):
         else:
             init_data = getattr(request, "init_data", None)
             if not verify_telegram_init_data(init_data):
-                return jsonify({"error": "unauthorized"}), 401
+                return jsonify({"error": ERROR_NO_ACCESS}), 401
             user = _parse_user(init_data) or {}
             tg_id = user.get("id")
 
@@ -140,7 +147,7 @@ def require_auth(f):
         if u is None:
             g.current_user = None
             g.current_user_level = 0
-            return jsonify({"error": "unauthorized"}), 401
+            return jsonify({"error": ERROR_NO_ACCESS}), 401
 
         g.current_user = u
         g.current_user_level = u.level
@@ -164,7 +171,7 @@ def require_level(min_level: int):
             if not Config.OPEN_ACCESS:
                 level = getattr(g, "current_user_level", 1)
                 if level < min_level:
-                    return jsonify({"error": "forbidden"}), 403
+                    return jsonify({"error": ERROR_NO_RIGHTS}), 403
             return f(*args, **kwargs)
 
         return decorated
@@ -180,7 +187,7 @@ def require_can_view_logs(f):
     def decorated(*args, **kwargs):
         level = getattr(g, "current_user_level", 1)
         if level not in (2, 3):
-            return jsonify({"error": "forbidden"}), 403
+            return jsonify({"error": ERROR_NO_RIGHTS}), 403
         return f(*args, **kwargs)
 
     return decorated
@@ -194,7 +201,7 @@ def require_can_clear_logs(f):
     def decorated(*args, **kwargs):
         level = getattr(g, "current_user_level", 1)
         if level != 3:
-            return jsonify({"error": "forbidden"}), 403
+            return jsonify({"error": ERROR_NO_RIGHTS}), 403
         return f(*args, **kwargs)
 
     return decorated

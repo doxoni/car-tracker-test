@@ -22,6 +22,7 @@ CYR = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
 SOURCES = [
     os.path.join(ROOT, "app", "legacy_routes.py"),
     os.path.join(ROOT, "app", "routes.py"),
+    os.path.join(ROOT, "app", "auth.py"),
     os.path.join(ROOT, "bot", "bot.py"),
     os.path.join(ROOT, "app", "i18n.py"),
     os.path.join(ROOT, "app", "notifications.py"),

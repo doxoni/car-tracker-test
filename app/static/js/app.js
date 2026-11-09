@@ -581,7 +581,7 @@
         });
         const answer = await r.json();
         if (!r.ok) {
-          tg.showAlert(answer.error === 'plate exists' ? 'Такая фура уже есть в списке' : 'Не удалось сохранить фуру');
+          tg.showAlert(answer.error || 'Не удалось сохранить фуру');
           return;
         }
         showFlash('Фура добавлена');

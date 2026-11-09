@@ -28,7 +28,14 @@ from app.config import Config
 from app.db_retry import run_with_retry
 from app.i18n import normalize_lang
 from app.models import User, Vehicle, Expense, FuelBarrel, FuelInflow, FuelOutflow, AuditLog, log_audit
-from app.auth import require_auth, require_level, require_can_view_logs, require_can_clear_logs
+from app.auth import (
+    require_auth,
+    require_level,
+    require_can_view_logs,
+    require_can_clear_logs,
+    ERROR_NO_ACCESS,
+    ERROR_NO_RIGHTS,
+)
 
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -98,6 +105,29 @@ def static_files(filename):
 
 
 # ---------- Helpers ----------
+
+# Что просим заполнить, если поле не пришло. Сообщения статичные:
+# так их видно пользователю и так их можно перевести на украинский.
+MISSING_FIELD = {
+    "plate": "нужен номер фуры",
+    "brand": "нужна марка фуры",
+    "driver_id": "нужен водитель",
+    "vehicle_id": "нужна фура",
+    "category": "нужна категория расхода",
+    "amount": "нужна сумма",
+    "date": "нужна дата",
+    "name": "нужно название",
+    "fuel_type": "нужен вид топлива",
+    "capacity_liters": "нужен объём бочки",
+    "liters": "нужно количество литров",
+    "price_per_liter": "нужна цена за литр",
+}
+
+
+def _missing_error(field: str) -> str:
+    """Ошибка о незаполненном поле (по-русски, без имён полей)."""
+    return MISSING_FIELD.get(field, "недостаточно данных")
+
 
 def _parse_date(date_str: str):
     """Парсинг даты в формате дд.мм.гггг или YYYY-MM-DD."""
@@ -227,12 +257,12 @@ def auth_verify():
     init_data = parse_init_data(raw)
 
     if not verify_telegram_init_data(init_data):
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
+        return jsonify({"ok": False, "error": ERROR_NO_ACCESS}), 401
 
     telegram_user = user_from_init_data(init_data)
     tg_id = telegram_user.get("id")
     if not tg_id:
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
+        return jsonify({"ok": False, "error": ERROR_NO_ACCESS}), 401
 
     user = User.query.filter_by(tg_id=tg_id).first()
     if user is None:
@@ -284,11 +314,11 @@ def create_vehicle():
     required = ["plate", "brand", "driver_id"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"missing {field}"}), 400
+            return jsonify({"error": _missing_error(field)}), 400
 
     # Проверить уникальность номера
     if Vehicle.query.filter_by(plate=data["plate"]).first():
-        return jsonify({"error": "plate exists"}), 400
+        return jsonify({"error": "такая фура уже есть в списке"}), 400
 
     old = None
     vehicle = Vehicle(
@@ -320,7 +350,7 @@ def get_vehicle(vehicle_id):
     """Получить детали фуры. Уровень 1 — только активные."""
     vehicle = Vehicle.query.get_or_404(vehicle_id)
     if not g.current_user.can_view_vehicle(vehicle):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": ERROR_NO_RIGHTS}), 403
     return jsonify(_jsonify_vehicle(vehicle))
 
 
@@ -337,7 +367,7 @@ def update_vehicle(vehicle_id):
             if field == "plate":
                 new_plate = data[field].strip().upper()
                 if new_plate != vehicle.plate and Vehicle.query.filter_by(plate=new_plate).first():
-                    return jsonify({"error": "plate exists"}), 400
+                    return jsonify({"error": "такая фура уже есть в списке"}), 400
                 setattr(vehicle, field, new_plate)
             elif field == "vin":
                 setattr(vehicle, field, data[field].strip().upper() or None)
@@ -430,15 +460,15 @@ def create_expense():
     required = ["vehicle_id", "category", "amount", "date"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"missing {field}"}), 400
+            return jsonify({"error": _missing_error(field)}), 400
 
     vehicle = Vehicle.query.get_or_404(data["vehicle_id"])
 
     if not g.current_user.can_add_expense(vehicle):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": ERROR_NO_RIGHTS}), 403
 
     if data["category"] not in Expense.CATEGORIES:
-        return jsonify({"error": "invalid category"}), 400
+        return jsonify({"error": "неверная категория"}), 400
 
     # При открытом доступе расход создаётся сразу утверждённым,
     # иначе: уровень 1 — pending, уровни 2/3 — approved сразу.
@@ -488,7 +518,7 @@ def update_expense(expense_id):
 
     if not Config.OPEN_ACCESS and g.current_user_level == 1:
         if expense.submitted_by != g.current_user.id or expense.status != "pending":
-            return jsonify({"error": "forbidden"}), 403
+            return jsonify({"error": ERROR_NO_RIGHTS}), 403
     # уровни 2/3 могут редактировать любые
 
     data = request.get_json() or {}
@@ -496,7 +526,7 @@ def update_expense(expense_id):
     for field in ("category", "amount", "date", "comment", "photo_url"):
         if field in data:
             if field == "category" and data[field] not in Expense.CATEGORIES:
-                return jsonify({"error": "invalid category"}), 400
+                return jsonify({"error": "неверная категория"}), 400
             if field == "date":
                 d = _parse_date(data[field])
                 if d:
@@ -526,7 +556,7 @@ def delete_expense(expense_id):
 
     if not Config.OPEN_ACCESS and g.current_user_level == 1:
         if expense.submitted_by != g.current_user.id or expense.status != "pending":
-            return jsonify({"error": "forbidden"}), 403
+            return jsonify({"error": ERROR_NO_RIGHTS}), 403
     # уровни 2/3 могут удалять любые
 
     old = _jsonify_expense(expense)
@@ -557,7 +587,7 @@ def approve_expense(expense_id):
     """Одобрить pending расход (только уровень 3)."""
     expense = Expense.query.get_or_404(expense_id)
     if expense.status != "pending":
-        return jsonify({"error": "not pending"}), 400
+        return jsonify({"error": "запись не на проверке"}), 400
 
     old = _jsonify_expense(expense)
     expense.status = "approved"
@@ -582,7 +612,7 @@ def reject_expense(expense_id):
     """Отклонить pending расход (только уровень 3)."""
     expense = Expense.query.get_or_404(expense_id)
     if expense.status != "pending":
-        return jsonify({"error": "not pending"}), 400
+        return jsonify({"error": "запись не на проверке"}), 400
 
     old = _jsonify_expense(expense)
     expense.status = "rejected"
@@ -706,10 +736,10 @@ def create_barrel():
     required = ["name", "fuel_type", "capacity_liters"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"missing {field}"}), 400
+            return jsonify({"error": _missing_error(field)}), 400
 
     if data["fuel_type"] not in ("diesel", "petrol"):
-        return jsonify({"error": "fuel_type must be diesel or petrol"}), 400
+        return jsonify({"error": "выберите дизель или бензин"}), 400
 
     old = None
     barrel = FuelBarrel(
@@ -753,7 +783,7 @@ def update_barrel(barrel_id):
     for field in ("name", "fuel_type", "capacity_liters", "current_liters", "avg_price_per_liter", "threshold_liters", "is_active"):
         if field in data:
             if field == "fuel_type" and data[field] not in ("diesel", "petrol"):
-                return jsonify({"error": "fuel_type must be diesel or petrol"}), 400
+                return jsonify({"error": "выберите дизель или бензин"}), 400
             if field in ("capacity_liters", "current_liters", "avg_price_per_liter", "threshold_liters"):
                 setattr(barrel, field, float(data[field]) if data[field] else None)
             elif field == "is_active":
@@ -811,7 +841,7 @@ def create_inflow(barrel_id):
     required = ["liters", "price_per_liter", "date"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"missing {field}"}), 400
+            return jsonify({"error": _missing_error(field)}), 400
 
     liters = float(data["liters"])
     price = float(data["price_per_liter"])
@@ -911,13 +941,13 @@ def create_outflow(barrel_id):
     required = ["vehicle_id", "liters", "date"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"missing {field}"}), 400
+            return jsonify({"error": _missing_error(field)}), 400
 
     vehicle = Vehicle.query.get_or_404(data["vehicle_id"])
     liters = float(data["liters"])
 
     if liters > barrel.current_liters:
-        return jsonify({"error": "not enough fuel in barrel"}), 400
+        return jsonify({"error": "в бочке недостаточно топлива"}), 400
 
     cost_per_liter = barrel.avg_price_per_liter or 0.0
     total = liters * cost_per_liter
