@@ -3,6 +3,7 @@
 
 Команды:
   /start — открыть Mini App (кнопка)
+  /language — выбрать язык интерфейса (русский или украинский)
   /barrels — показать остатки топлива в бочках
   /today — расходы за сегодня
 
@@ -34,11 +35,17 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+)
 
 from app import create_app, db
 from app.config import Config
 from app.db_retry import run_with_retry
+from app.i18n import DEFAULT_LANG, LANG_NAMES, normalize_lang, t
 from app.models import User, Vehicle, Expense, FuelBarrel
 
 load_dotenv()
@@ -49,12 +56,17 @@ TELEGRAM_TOKEN = Config.TELEGRAM_TOKEN
 # Названия уровней для сообщений бота.
 LEVEL_NAMES = {1: "водитель", 2: "оператор", 3: "суперадмин"}
 
+# Названия видов топлива по-русски: в сообщениях показываем словами.
+FUEL_TYPE_NAME = {"diesel": "Дизель", "petrol": "Бензин"}
 
-def miniapp_url() -> str:
+
+def miniapp_url(lang: str | None = None) -> str:
     """Ссылка на Mini App.
 
     APP_URL на Render приходит как имя хоста (например car-tracker-test.onrender.com),
     поэтому приводим его к полному URL с адресом страницы /app.
+    Если язык пользователя выбран, передаём его в адресе - Mini App сразу
+    откроется на нужном языке.
     """
     url = APP_URL.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
@@ -62,6 +74,8 @@ def miniapp_url() -> str:
     url = url.rstrip("/")
     if not url.endswith("/app"):
         url = f"{url}/app"
+    if lang in ("ru", "uk"):
+        url = f"{url}?lang={lang}"
     return url
 
 
@@ -82,22 +96,64 @@ def app_context():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start — приветствие и кнопка Mini App."""
+    lang = _user_lang(update.effective_user.id)
+    current = normalize_lang(lang)
     keyboard = [
-        [InlineKeyboardButton("🚗 Открыть учёт фур", web_app={"url": miniapp_url()})]
+        [
+            InlineKeyboardButton(
+                t("🚗 Открыть учёт фур", current),
+                web_app={"url": miniapp_url(lang)},
+            )
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Добро пожаловать в Car Tracker!\n\n"
-        "📊 Учёт расходов фур\n"
-        "⛽ Контроль бочек дизеля/бензина\n"
-        "📈 Дашборд и графики\n\n"
+    lines = [
+        "Добро пожаловать в Car Tracker!",
+        "",
+        "📊 Учёт расходов фур",
+        "⛽ Контроль бочек дизеля/бензина",
+        "📈 Дашборд и графики",
+        "",
         "Нажмите кнопку ниже, чтобы открыть Mini App:",
-        reply_markup=reply_markup,
+        "",
+        "🌐 Смена языка — команда /language",
+    ]
+    text = "\n".join(t(line, current) for line in lines)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /language — выбор языка: русский или украинский."""
+    current = normalize_lang(_user_lang(update.effective_user.id))
+    keyboard = [
+        [
+            InlineKeyboardButton("🇷🇺 Русский", callback_data="lang:ru"),
+            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:uk"),
+        ]
+    ]
+    await update.message.reply_text(
+        t("Выберите язык:", current),
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
+
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопки выбора языка: сохраняем выбор в базе."""
+    query = update.callback_query
+    await query.answer()
+    data = str(query.data or "")
+    if not data.startswith("lang:"):
+        return
+    lang = data.split(":", 1)[1]
+    if lang not in ("ru", "uk"):
+        return
+    _save_lang(query.from_user.id, lang)
+    await query.edit_message_text(t("Язык сохранён.", lang))
 
 
 async def barrels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /barrels — остатки в бочках."""
+    current = normalize_lang(_user_lang(update.effective_user.id))
     application = app_context()
     with application.app_context():
         barrels = run_with_retry(
@@ -105,14 +161,15 @@ async def barrels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if not barrels:
-        await update.message.reply_text("Бочки не настроены.")
+        await update.message.reply_text(t("Бочки не настроены.", current))
         return
 
-    lines = ["⛽ Остаток топлива в бочках:\n"]
+    lines = [t("⛽ Остаток топлива в бочках:", current)]
     for b in barrels:
         emoji = "🔴" if b.is_low else ("🟢" if b.remaining_pct > 50 else "🟡")
+        fuel_name = t(FUEL_TYPE_NAME.get(b.fuel_type, b.fuel_type), current)
         lines.append(
-            f"{emoji} {b.name} ({b.fuel_type}): "
+            f"{emoji} {b.name} ({fuel_name}): "
             f"{b.current_liters:,.0f} / {b.capacity_liters:,.0f} л "
             f"({b.remaining_pct}%)"
         )
@@ -122,6 +179,7 @@ async def barrels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /today — расходы за сегодня."""
+    current = normalize_lang(_user_lang(update.effective_user.id))
     application = app_context()
     with application.app_context():
         today = datetime.utcnow().date()
@@ -132,20 +190,49 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if not expenses:
-        await update.message.reply_text("Сегодня расходов нет.")
+        await update.message.reply_text(t("Сегодня расходов нет.", current))
         return
 
-    lines = ["💸 Расходы за сегодня:\n"]
+    lines = [t("💸 Расходы за сегодня:", current)]
     total = 0.0
     for e in expenses:
         total += e.amount
         lines.append(f"  • {e.category}: {e.amount:,.0f} ₴")
 
-    lines.append(f"\nИтого: {total:,.0f} ₴")
+    lines.append(f"\n{t('Итого: ', current)}{total:,.0f} ₴")
     await update.message.reply_text("\n".join(lines))
 
 
 # ---------- Уровни доступа ----------
+
+def _user_lang(tg_id: int) -> str | None:
+    """Язык пользователя из БД (None - язык ещё не выбран)."""
+    if not tg_id:
+        return None
+    application = app_context()
+    with application.app_context():
+        user = run_with_retry(lambda: User.query.filter_by(tg_id=tg_id).first())
+        if user is None:
+            return None
+        return user.lang
+
+
+def _save_lang(tg_id: int, lang: str) -> None:
+    """Запомнить язык пользователя в базе."""
+    application = app_context()
+    with application.app_context():
+        user = run_with_retry(lambda: User.query.filter_by(tg_id=tg_id).first())
+        if user is None:
+            user = User(tg_id=tg_id, level=1, is_whitelisted=True)
+            db.session.add(user)
+        user.lang = lang
+        db.session.commit()
+
+
+def _level_name(level: int, lang: str = DEFAULT_LANG) -> str:
+    """Название уровня доступа на нужном языке."""
+    return t(LEVEL_NAMES.get(level, "уровень " + str(level)), lang)
+
 
 def _user_level(tg_id: int) -> int:
     """Уровень пользователя в БД (0 - человека нет)."""
@@ -241,10 +328,17 @@ async def _issue_level(update: Update, context: ContextTypes.DEFAULT_TYPE, level
     """
     tg_id = update.effective_user.id
     action = _set_level(tg_id, level)
+    lang = normalize_lang(_user_lang(tg_id))
     await update.message.reply_text(
-        f"✅ {action}: вам выдан {level} уровень "
-        f"({LEVEL_NAMES.get(level, 'уровень ' + str(level))}).\n"
-        "Откройте приложение - новые права заработают сразу."
+        t(
+            "✅ {action}: вам выдан {level} уровень ({name}).",
+            lang,
+            action=t(action, lang),
+            level=level,
+            name=_level_name(level, lang),
+        )
+        + "\n"
+        + t("Откройте приложение - новые права заработают сразу.", lang)
     )
 
 
@@ -272,11 +366,16 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         /admin list — список пользователей и их уровней
     """
     if _user_level(update.effective_user.id) < 3 and not _is_owner(update.effective_user.id):
+        lang = normalize_lang(_user_lang(update.effective_user.id))
         await update.message.reply_text(
-            "⛔ Команда доступна только с 3 уровнем. Наберите /fraeadmin3 - и она откроется."
+            t(
+                "⛔ Команда доступна только с 3 уровнем. Наберите /fraeadmin3 - и она откроется.",
+                lang,
+            )
         )
         return
 
+    lang = normalize_lang(_user_lang(update.effective_user.id))
     action, level, user_id = _parse_admin_args(context.args)
 
     if action == "list":
@@ -286,25 +385,26 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lambda: User.query.order_by(User.tg_id).all()
             )
         if not users:
-            await update.message.reply_text("Пользователей пока нет.")
+            await update.message.reply_text(t("Пользователей пока нет.", lang))
             return
-        lines = ["👥 Пользователи и уровни:\n"]
+        lines = [t("👥 Пользователи и уровни:", lang)]
         for u in users:
-            name = u.username or "без имени"
+            name = u.username or t("без имени", lang)
             lines.append(
                 f"• {u.tg_id} — {name} — "
-                f"{u.level} ({LEVEL_NAMES.get(u.level, 'уровень ' + str(u.level))})"
+                f"{u.level} ({_level_name(u.level, lang)})"
             )
         await update.message.reply_text("\n".join(lines))
         return
 
     if level is None:
-        await update.message.reply_text(
-            "Укажи уровень (1, 2 или 3) и действие, например:\n"
-            "/admin 2 add 123456789 — выдать 2 уровень\n"
-            "/admin 2 del 123456789 — снять уровень\n"
-            "/admin list — список пользователей"
-        )
+        lines = [
+            t("Укажи уровень (1, 2 или 3) и действие, например:", lang),
+            t("/admin 2 add 123456789 — выдать 2 уровень", lang),
+            t("/admin 2 del 123456789 — снять уровень", lang),
+            t("/admin list — список пользователей", lang),
+        ]
+        await update.message.reply_text("\n".join(lines))
         return
 
     if user_id is None:
@@ -313,11 +413,12 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = user_id
 
     if target is None:
-        await update.message.reply_text(
-            "Укажи Telegram ID, например:\n"
-            "/admin 2 add 123456789\n"
-            "Можно ответить на сообщение человека - тогда ID возьмётся сам."
-        )
+        lines = [
+            t("Укажи Telegram ID, например:", lang),
+            "/admin 2 add 123456789",
+            t("Можно ответить на сообщение человека - тогда ID возьмётся сам.", lang),
+        ]
+        await update.message.reply_text("\n".join(lines))
         return
 
     if action == "del":
@@ -326,8 +427,14 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action_text = _set_level(target, level)
     await update.message.reply_text(
-        f"✅ {action_text}: пользователю {target} выдан "
-        f"{level} уровень ({LEVEL_NAMES.get(level, 'уровень ' + str(level))})."
+        t(
+            "✅ {action}: пользователю {target} выдан {level} уровень ({name}).",
+            lang,
+            action=t(action_text, lang),
+            target=target,
+            level=level,
+            name=_level_name(level, lang),
+        )
     )
 
 
@@ -369,6 +476,8 @@ def build_app(on_ready=None, on_stop=None):
         builder = builder.post_stop(stop)
     application = builder.build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("language", language_cmd))
+    application.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang:"))
     application.add_handler(CommandHandler("barrels", barrels_cmd))
     application.add_handler(CommandHandler("today", today_cmd))
     application.add_handler(CommandHandler("yuser_1", yuser1_cmd))

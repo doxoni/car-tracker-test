@@ -21,6 +21,7 @@ from flask import Blueprint, Response, g, jsonify, request
 
 from app import db
 from app.auth import require_auth
+from app.i18n import current_lang, t
 from app.legacy_catalog import all_items
 from app.legacy_plates import format_plate, normalize_plate
 from app.models import (
@@ -67,6 +68,11 @@ TRUCK_MODELS = (
 
 BARREL_TYPES = ("diesel", "petrol")
 BARREL_ACTIONS = ("add", "fill", "sub")
+
+# Названия видов топлива и действий бочки по-русски: в выгрузке текстом
+# показываем их словами, а не служебными кодами.
+BARREL_TYPE_NAME = {"diesel": "Дизель", "petrol": "Бензин"}
+BARREL_ACTION_NAME = {"add": "Пополнение", "fill": "Заправка", "sub": "Убавление"}
 
 
 # ---------- Вспомогательные функции ----------
@@ -1292,12 +1298,13 @@ def api_report_summary():
 
 def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
     """Строки истории по одной фуре (для выгрузки текстом)."""
+    lang = current_lang()
     lines = [
-        f"Машина: {vehicle.brand or ''} {format_plate(vehicle.plate)}",
-        f"Пробег: {int(vehicle.current_mileage or 0)} км",
+        f"{t('Машина:', lang)} {vehicle.brand or ''} {format_plate(vehicle.plate)}",
+        f"{t('Пробег:', lang)} {int(vehicle.current_mileage or 0)} км",
         "",
     ]
-    lines.append("Заправки:")
+    lines.append(t("Заправки:", lang))
     for entry in _fuel_rows(vehicle.id):
         lines.append(
             f"  {_iso(entry.created_at)} | {float(entry.liters or 0):.1f} л | "
@@ -1305,7 +1312,7 @@ def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
             f"{entry.odometer if entry.odometer is not None else '-'}"
         )
     lines.append("")
-    lines.append("Обслуживание:")
+    lines.append(t("Обслуживание:", lang))
     for service in _service_rows(vehicle.id):
         lines.append(
             f"  {_iso(service.created_at)} | {service.description or ''} | "
@@ -1313,7 +1320,7 @@ def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
             f"{service.odometer if service.odometer is not None else '-'}"
         )
     lines.append("")
-    lines.append("Расходы:")
+    lines.append(t("Расходы:", lang))
     for expense in _expense_rows(vehicle.id):
         lines.append(
             f"  {_iso(expense.date)} | {expense.comment or ''} | "
@@ -1348,13 +1355,16 @@ def api_report():
     elif barrel:
         if barrel not in ("all",) + BARREL_TYPES:
             return _fail("неизвестный вид топлива")
-        lines = ["Бочка:", ""]
+        lang = current_lang()
+        lines = [t("Бочка:", lang), ""]
         for item in _barrel_rows():
             if barrel != "all" and item["fuel_type"] != barrel:
                 continue
+            fuel_name = t(BARREL_TYPE_NAME.get(item["fuel_type"], item["fuel_type"]), lang)
+            action_name = t(BARREL_ACTION_NAME.get(item["action"], item["action"]), lang)
             lines.append(
-                f"  {_iso(item['created_at'])} | {item['fuel_type']} | "
-                f"{item['action']} | {item['liters']:.1f} л | {item['car_plate']}"
+                f"  {_iso(item['created_at'])} | {fuel_name} | "
+                f"{action_name} | {item['liters']:.1f} л | {item['car_plate']}"
             )
         filename = "bochka.txt"
     else:

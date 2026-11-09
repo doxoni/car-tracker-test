@@ -107,6 +107,11 @@ def create_app():
     app.before_request(_parse_init_data)
     app.before_request(_ensure_bot_on_request)
 
+    # Ответы API переводим на язык пользователя (русский или украинский).
+    from .i18n import translate_response
+
+    app.after_request(translate_response)
+
     # Регистрация blueprints (маршрутов)
     from .routes import bp as routes_bp, web_bp
     from .legacy_routes import bp as legacy_bp

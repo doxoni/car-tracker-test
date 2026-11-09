@@ -1,29 +1,26 @@
 # -*- coding: utf-8 -*-
-"""Перевод сообщений сервера на два языка: русский и украинский.
+"""Переводы интерфейса: русский и украинский.
 
-Словарь лежит в app/i18n_dict.py и устроен просто: ключ - русский текст,
-значение - украинский. Ключом может быть и шаблон с подстановками,
-например "Машина с номером {plate} уже есть в базе".
+Исходники проекта на русском (так требует AGENTS.md), украинский появляется
+только через словарь app/i18n_dict.py, который собирается из
+tools/i18n_dict.json скриптом tools/build_i18n_dict.py.
 
-Использование:
-    from app.i18n import t
-    t("Машина добавлена", lang)
-    t("Машина с номером {plate} уже есть в базе", lang, plate="АА1234ВВ")
+Язык пользователя хранится в users.lang: его выбирают в боте (команда
+/language) или в Mini App (кнопка смены языка).
 
-Запуск (проверка словаря):
-    python -m app.i18n
+Запуск (из папки проекта):
+    python app/main.py
 """
+
+import json
+
+from flask import g, request
 
 from app.i18n_dict import MESSAGES
 
-# Русский - язык по умолчанию, украинский - второй.
 DEFAULT_LANG = "ru"
 LANGS = ("ru", "uk")
-
-LANG_NAMES = {
-    "ru": "Русский",
-    "uk": "Українська",
-}
+LANG_NAMES = {"ru": "Русский", "uk": "Українська"}
 
 
 def normalize_lang(value) -> str:
@@ -33,17 +30,15 @@ def normalize_lang(value) -> str:
 
 
 def t(text: str, lang: str = DEFAULT_LANG, **kwargs) -> str:
-    """Перевести текст на язык пользователя.
+    """Перевести строку с русского на украинский.
 
-    text - русский текст или шаблон с подстановками ({plate} и т.п.).
-    kwargs - значения подстановок; подставляются уже в перевод.
+    В kwargs можно передать значения для подстановки: {plate}, {count}.
     """
     result = MESSAGES.get(text, text)
     if kwargs:
         try:
             result = result.format(**kwargs)
         except (KeyError, IndexError, ValueError):
-            # Перевод не подошёл под подстановки - показываем русский текст.
             try:
                 result = text.format(**kwargs)
             except (KeyError, IndexError, ValueError):
@@ -51,18 +46,46 @@ def t(text: str, lang: str = DEFAULT_LANG, **kwargs) -> str:
     return result
 
 
-def main() -> int:
-    """Проверить словарь переводов."""
-    print(f"Строк в словаре: {len(MESSAGES)}")
-    missing = [text for text, value in MESSAGES.items() if not value]
-    if missing:
-        print(f"Без перевода: {len(missing)}")
-        for text in missing[:20]:
-            print(f"  {text}")
-        return 1
-    print("Все строки переведены.")
-    return 0
+def current_lang() -> str:
+    """Язык текущего запроса.
+
+    Берём язык из базы (поле users.lang). Если язык ещё не выбран,
+    смотрим параметр ?lang= в адресе - так бот передаёт выбранный язык
+    при первом открытии Mini App.
+    """
+    user = getattr(g, "current_user", None)
+    lang = getattr(user, "lang", None)
+    if not lang:
+        try:
+            lang = request.args.get("lang")
+        except RuntimeError:
+            # Вне контекста запроса (например, в потоке бота).
+            lang = None
+    return normalize_lang(lang)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def translate_response(response):
+    """Перевести текстовые поля ответа ("error", "message") на язык пользователя.
+
+    Файл отчёта (text/plain) здесь не трогаем - его переводит сам отчёт.
+    """
+    if response.mimetype != "application/json":
+        return response
+    lang = current_lang()
+    if lang == DEFAULT_LANG:
+        return response
+    data = response.get_json(silent=True)
+    if not isinstance(data, dict):
+        return response
+    changed = False
+    for key in ("error", "message"):
+        value = data.get(key)
+        if isinstance(value, str):
+            translated = t(value, lang)
+            if translated != value:
+                data[key] = translated
+                changed = True
+    if not changed:
+        return response
+    response.set_data(json.dumps(data, ensure_ascii=False))
+    return response
