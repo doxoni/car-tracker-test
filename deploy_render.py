@@ -227,7 +227,8 @@ def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
 
     Формат тот же, что и при создании: plan лежит внутри serviceDetails,
     иначе Render отвечает 402 ("Payment information is required").
-    Ошибка здесь не критична - gunicorn и сам подхватывает gunicorn.conf.py
+    Render принимает обновление только через PATCH - на PUT отвечает 405.
+    Ошибка здесь не критична: gunicorn и сам подхватывает gunicorn.conf.py
     из рабочей папки, поэтому при неудаче просто пишем предупреждение.
     """
     try:
@@ -238,12 +239,6 @@ def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
         if env_details.get("startCommand") == START_COMMAND:
             return True
         payload = {
-            "type": "web_service",
-            "name": service_details.get("name") or SERVICE_NAME,
-            "ownerId": owner_id,
-            "repo": details.get("repo") or SERVICE_REPO,
-            "branch": details.get("branch") or SERVICE_BRANCH,
-            "autoDeployTrigger": details.get("autoDeployTrigger") or "commit",
             "serviceDetails": {
                 "runtime": service_details.get("runtime") or "python",
                 "plan": service_details.get("plan") or SERVICE_PLAN,
@@ -258,7 +253,7 @@ def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
                 },
             },
         }
-        api("PUT", f"/services/{service_id}", key, payload)
+        api("PATCH", f"/services/{service_id}", key, payload)
         return True
     except SystemExit:
         print("⚠️  Команду запуска обновить не удалось - деплой продолжим.")
