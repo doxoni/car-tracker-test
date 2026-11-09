@@ -1693,6 +1693,9 @@ function loadCars() {
       if (searchQuery) {
         box.innerHTML = emptyHtml("🔍", "Ничего не нашлось",
           "По запросу «" + searchQuery + "» машин нет");
+      } else if (userLevel < 2) {
+        box.innerHTML = emptyHtml("🔍", "Найдите свою машину",
+          "Введите номер или марку в поле поиска сверху");
       } else {
         box.innerHTML = emptyHtml("🚗", "Пока нет машин", "Добавь первую — кнопка ниже");
       }

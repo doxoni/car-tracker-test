@@ -241,15 +241,18 @@ def _car_for_user(vehicle_id: int):
 def _visible_vehicles(query: str = ""):
     """Фуры, доступные пользователю.
 
-    Уровень 2 и выше видят все фуры, остальные — свои (по водителю)
-    и активные. При поиске видны все подходящие, чтобы можно было
-    найти нужную машину.
+    Уровень 2 и выше видят все фуры. Водитель (уровень 1) видит только
+    то, что нашлось по поиску: без поискового запроса список пустой.
+    При поиске видны все подходящие фуры, чтобы можно было найти
+    нужную машину.
     """
     level = _level()
     if query:
         return Vehicle.query.order_by(Vehicle.id.asc()).all()
     if _is_full_admin(level):
         return Vehicle.query.order_by(Vehicle.id.asc()).all()
+    if level < 2:
+        return []
     return Vehicle.query.filter(
         Vehicle.status == "active"
     ).order_by(Vehicle.id.asc()).all()

@@ -280,3 +280,78 @@ def test_level_three_can_see_reports(client, app):
     assert response.status_code == 200
     assert response.get_json()["ok"] is True
 
+
+def test_level_one_sees_no_cars_without_search(client, app):
+    """Водитель без поиска не видит список машин."""
+    from app import db
+    from app.models import Vehicle
+
+    with app.app_context():
+        user = _make_user(1)
+        db.session.add(
+            Vehicle(
+                plate="АА1111АА",
+                brand="MAN",
+                driver_id=user.id,
+                current_mileage=100000,
+                status="active",
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/api/cars")
+
+    assert response.status_code == 200
+    assert response.get_json()["cars"] == []
+
+
+def test_level_one_sees_cars_found_by_search(client, app):
+    """Водитель видит ту машину, которую нашёл поиском."""
+    from app import db
+    from app.models import Vehicle
+
+    with app.app_context():
+        user = _make_user(1)
+        db.session.add(
+            Vehicle(
+                plate="АА1111АА",
+                brand="MAN",
+                driver_id=user.id,
+                current_mileage=100000,
+                status="active",
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/api/cars?q=1111")
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert len(data["cars"]) == 1
+    assert data["cars"][0]["plate"] == "АА1111АА"
+
+
+def test_level_three_sees_all_cars_without_search(client, app):
+    """Суперадмин видит все машины и без поиска."""
+    from app import db
+    from app.models import Vehicle
+
+    with app.app_context():
+        user = _make_user(3)
+        db.session.add(
+            Vehicle(
+                plate="АА1111АА",
+                brand="MAN",
+                driver_id=user.id,
+                current_mileage=100000,
+                status="active",
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/api/cars")
+
+    assert response.status_code == 200
+    assert len(response.get_json()["cars"]) == 1
+
+
