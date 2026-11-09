@@ -15,6 +15,7 @@
   - `app/legacy_routes.py` — API старой системы (`/api/cars`, `/api/drivers`, `/api/customers`, `/api/catalog`, `/api/barrel`, `/api/month-costs`, `/api/report-summary`, `/api/report`, `/api/reports`), который использует старая GUI.
   - `app/legacy_catalog.py` — каталог работ по обслуживанию (101 пункт, группа `service`).
   - `app/import_legacy.py` — импорт данных старой `cars.db` в новую базу.
+- `app/import_wlp.py` — импорт машин из архива Wialon (`.wlp`): номер и марка из имени объекта.
   - `app/notifications.py` — отправка уведомлений в Telegram.
   - `app/main.py` — точка входа: веб-сервер + бот в отдельном потоке.
   - `app/bot_runner.py` — запуск бота в потоке (для gunicorn на Render).
@@ -36,6 +37,8 @@
 - `setup_all.cmd` — одна команда: база + Render + админ.
 - `create_admin.py` — создаёт админа в БД (уровень 1/2/3).
 - `night_sleep.py` — усыпление и разбуживание сервиса на Render через API (suspend/resume).
+- `import_wlp.cmd` — загрузить машины из архива Wialon (`.wlp`) в облачную базу:
+  `.\import_wlp.cmd "C:\путь\Объекты (1).zip"`.
 - `app/night_mode.py` — ночное окно 02:00-05:00 по Киеву (`is_night`, `night_info`).
 - `set_level.cmd` — выдать уровень доступа без правки скриптов.
 
