@@ -25,6 +25,7 @@ from app.models import (  # noqa: E402
     Expense,
     FuelBarrel,
     FuelInflow,
+    FuelOutflow,
     Driver,
     Customer,
     FuelEntry,
@@ -128,6 +129,14 @@ def old_db(tmp_path):
         "INSERT INTO barrel (id, user_id, fuel_type, action, car_plate, liters, created_at)"
         " VALUES (1, 1, 'diesel', 'fill', 'AA1234BB', 500.0, '2026-02-05 10:00:00')"
     )
+    connection.execute(
+        "INSERT INTO barrel (id, user_id, fuel_type, action, car_plate, liters, created_at)"
+        " VALUES (2, 1, 'diesel', 'add', '', 1000.0, '2026-02-06 10:00:00')"
+    )
+    connection.execute(
+        "INSERT INTO barrel (id, user_id, fuel_type, action, car_plate, liters, created_at)"
+        " VALUES (3, 1, 'diesel', 'sub', '', 200.0, '2026-02-07 10:00:00')"
+    )
     connection.commit()
     connection.close()
     return str(path)
@@ -159,7 +168,7 @@ def test_import_moves_all_tables(app, old_db):
     assert service_count == 1
     assert expense_count == 1
     assert report_count == 1
-    assert barrel_count == 1
+    assert barrel_count == 3
 
     assert Vehicle.query.count() == 2
     assert Driver.query.count() == 1
@@ -169,7 +178,35 @@ def test_import_moves_all_tables(app, old_db):
     assert Expense.query.count() == 1
     assert Report.query.count() == 1
     assert FuelBarrel.query.count() == 1
+    # 'add' - приход, 'fill' и 'sub' - расход.
     assert FuelInflow.query.count() == 1
+    assert FuelOutflow.query.count() == 2
+
+
+def test_import_barrels_keeps_old_balance(app, old_db):
+    """Остаток бочки считается как в старой системе.
+
+    Долили (1000) минус заправили из бочки (500) минус убавили (200).
+    """
+    admin = User(tg_id=5808824236, level=3)
+    db.session.add(admin)
+    db.session.commit()
+
+    old = sqlite3.connect(old_db)
+    driver_ids = import_legacy.import_drivers(old, admin)
+    vehicle_ids = import_legacy.import_vehicles(old, admin, driver_ids)
+    import_legacy.import_barrels(old)
+    old.close()
+
+    barrel = FuelBarrel.query.one()
+    assert barrel.current_liters == 300.0
+
+    # Заправка привязана к той фуре, номер которой указан в записи бочки.
+    fill = FuelOutflow.query.filter_by(vehicle_id=vehicle_ids["1"]).one()
+    assert fill.liters == 500.0
+    # Убавили - без машины.
+    sub = FuelOutflow.query.filter(FuelOutflow.vehicle_id.is_(None)).one()
+    assert sub.liters == 200.0
 
 
 def test_import_keeps_vehicle_data(app, old_db):
@@ -215,3 +252,9 @@ def test_import_is_not_duplicated(app, old_db):
     assert Vehicle.query.count() == 2
     assert Driver.query.count() == 1
     assert Customer.query.count() == 1
+    assert FuelEntry.query.count() == 1
+    assert ServiceEntry.query.count() == 1
+    assert Expense.query.count() == 1
+    assert Report.query.count() == 1
+    assert FuelInflow.query.count() == 1
+    assert FuelOutflow.query.count() == 2

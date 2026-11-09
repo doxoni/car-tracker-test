@@ -12,7 +12,12 @@ SQLAlchemy + PostgreSQL) хранят разные вещи. Импорт пер
     services  -> service_entries (ТО)
     expenses  -> expenses      (расходы)
     reports   -> reports       (акты)
-    barrel    -> fuel_barrels + fuel_inflow (наполнения бочек)
+    barrel    -> fuel_barrels + fuel_inflow/fuel_outflow (движения бочек)
+
+Движения бочки в старой системе:
+    add  -> долили бочку        -> fuel_inflow (остаток растёт)
+    fill -> заправили машину    -> fuel_outflow с машиной (остаток падает)
+    sub  -> убавили             -> fuel_outflow без машины (остаток падает)
 
 Запуск:
     python -m app.import_legacy --db "C:\\path\\cars.db" --user-id 123456
@@ -33,12 +38,14 @@ from app.models import (
     Expense,
     FuelBarrel,
     FuelInflow,
+    FuelOutflow,
     Driver,
     Customer,
     FuelEntry,
     ServiceEntry,
     Report,
 )
+from app.legacy_plates import normalize_plate
 
 
 # ---------- Вспомогательные функции ----------
@@ -165,6 +172,16 @@ def import_fuel_entries(
         vehicle_id = vehicle_ids.get(str(car_id))
         if vehicle_id is None:
             continue
+        when = _parse_dt(created_at) or datetime.utcnow()
+        # Повторный импорт не должен плодить дубли.
+        exists = FuelEntry.query.filter_by(
+            vehicle_id=vehicle_id,
+            liters=float(liters or 0),
+            amount=float(amount or 0),
+            created_at=when,
+        ).first()
+        if exists is not None:
+            continue
         db.session.add(
             FuelEntry(
                 vehicle_id=vehicle_id,
@@ -174,7 +191,7 @@ def import_fuel_entries(
                 odometer=int(odometer) if odometer else None,
                 is_full=bool(is_full),
                 location=location,
-                created_at=_parse_dt(created_at) or datetime.utcnow(),
+                created_at=when,
             )
         )
         count += 1
@@ -204,6 +221,15 @@ def import_service_entries(
         vehicle_id = vehicle_ids.get(str(car_id))
         if vehicle_id is None:
             continue
+        when = _parse_dt(created_at) or datetime.utcnow()
+        exists = ServiceEntry.query.filter_by(
+            vehicle_id=vehicle_id,
+            amount=float(amount or 0),
+            description=description,
+            created_at=when,
+        ).first()
+        if exists is not None:
+            continue
         db.session.add(
             ServiceEntry(
                 vehicle_id=vehicle_id,
@@ -213,7 +239,7 @@ def import_service_entries(
                 odometer=int(odometer) if odometer else None,
                 next_km=int(next_km) if next_km else None,
                 next_date=_parse_dt(next_date),
-                created_at=_parse_dt(created_at) or datetime.utcnow(),
+                created_at=when,
             )
         )
         count += 1
@@ -233,16 +259,26 @@ def import_expenses(
         vehicle_id = vehicle_ids.get(str(car_id))
         if vehicle_id is None:
             continue
+        when = _parse_dt(created_at) or datetime.utcnow()
+        comment = " ".join(x for x in (description, details) if x) or None
+        exists = Expense.query.filter_by(
+            vehicle_id=vehicle_id,
+            amount=float(amount or 0),
+            comment=comment,
+            date=when,
+        ).first()
+        if exists is not None:
+            continue
         db.session.add(
             Expense(
                 vehicle_id=vehicle_id,
                 category="прочее",
                 amount=float(amount or 0),
-                comment=" ".join(x for x in (description, details) if x) or None,
+                comment=comment,
                 status="approved",
                 submitted_by=user.id,
                 approved_by=user.id,
-                date=_parse_dt(created_at) or datetime.utcnow(),
+                date=when,
             )
         )
         count += 1
@@ -272,6 +308,14 @@ def import_reports(
         paid,
         created_at,
     ) in rows:
+        when = _parse_dt(created_at) or datetime.utcnow()
+        exists = Report.query.filter_by(
+            vehicle_id=vehicle_ids.get(str(car_id)),
+            client=client,
+            created_at=when,
+        ).first()
+        if exists is not None:
+            continue
         db.session.add(
             Report(
                 vehicle_id=vehicle_ids.get(str(car_id)),
@@ -281,7 +325,7 @@ def import_reports(
                 driver=driver,
                 mileage=int(mileage) if mileage else None,
                 paid=bool(paid),
-                created_at=_parse_dt(created_at) or datetime.utcnow(),
+                created_at=when,
             )
         )
         count += 1
@@ -289,20 +333,56 @@ def import_reports(
     return count
 
 
-def import_barrels(old: sqlite3.Connection) -> int:
-    """Наполнения бочек: старые barrel -> fuel_barrels + fuel_inflow.
+def _find_vehicle_by_plate(plate: str) -> Vehicle | None:
+    """Фура по номеру. Номера сравниваются в нормализованном виде.
 
-    В старой системе бочка - это запись о наполнении: тип топлива, что
-    сделали (fill), сколько литров и для какой машины. Самих бочек с
-    объёмом там нет, поэтому создаём бочку на каждый тип топлива и
-    записываем приход.
+    В старой базе номер может быть набран латиницей, в новой - кириллицей,
+    поэтому сравниваем приведённые к одному виду номера.
+    """
+    if not plate:
+        return None
+    wanted = normalize_plate(plate)
+    for vehicle in Vehicle.query.all():
+        if normalize_plate(vehicle.plate or "") == wanted:
+            return vehicle
+    return None
+
+
+def _recalculate_barrel_levels() -> None:
+    """Пересчитать остаток бочек по приходам и расходам.
+
+    Остаток = долили минус заправили из бочки минус убавили - так же,
+    как считает старая система.
+    """
+    for barrel in FuelBarrel.query.all():
+        inflow = db.session.query(db.func.coalesce(db.func.sum(FuelInflow.liters), 0)).filter(
+            FuelInflow.barrel_id == barrel.id
+        ).scalar()
+        outflow = db.session.query(db.func.coalesce(db.func.sum(FuelOutflow.liters), 0)).filter(
+            FuelOutflow.barrel_id == barrel.id
+        ).scalar()
+        barrel.current_liters = round(float(inflow or 0) - float(outflow or 0), 3)
+    db.session.commit()
+
+
+def import_barrels(old: sqlite3.Connection) -> int:
+    """Движения бочек: старые barrel -> fuel_inflow / fuel_outflow.
+
+    В старой системе запись бочки - это действие:
+    add  - долили бочку (приход, остаток растёт);
+    fill - заправили машину из бочки (расход, остаток падает);
+    sub  - убавили (расход, остаток падает).
+
+    Самих бочек с объёмом в старой системе нет, поэтому создаём бочку на
+    каждый вид топлива.
     """
     rows = old.execute(
-        "SELECT fuel_type, action, liters, created_at FROM barrel ORDER BY id"
+        "SELECT fuel_type, action, car_plate, liters, created_at FROM barrel ORDER BY id"
     ).fetchall()
     count = 0
-    for fuel_type, action, liters, created_at in rows:
-        if action != "fill":
+    for fuel_type, action, car_plate, liters, created_at in rows:
+        action = (action or "").strip()
+        if action not in ("add", "fill", "sub"):
             continue
         name = "Бочка дизель" if fuel_type == "diesel" else "Бочка бензин"
         barrel = FuelBarrel.query.filter_by(name=name).first()
@@ -310,24 +390,50 @@ def import_barrels(old: sqlite3.Connection) -> int:
             barrel = FuelBarrel(
                 name=name,
                 fuel_type=fuel_type,
-                capacity_liters=1000.0,
+                capacity_liters=30000.0,
                 current_liters=0.0,
             )
             db.session.add(barrel)
             db.session.flush()
         amount = float(liters or 0)
-        barrel.current_liters = float(barrel.current_liters or 0) + amount
-        db.session.add(
-            FuelInflow(
+        when = _parse_dt(created_at) or datetime.utcnow()
+
+        if action == "add":
+            exists = FuelInflow.query.filter_by(
+                barrel_id=barrel.id, liters=amount, date=when
+            ).first()
+            if exists is None:
+                db.session.add(
+                    FuelInflow(
+                        barrel_id=barrel.id,
+                        liters=amount,
+                        price_per_liter=0.0,
+                        total=0.0,
+                        date=when,
+                    )
+                )
+        else:
+            vehicle = _find_vehicle_by_plate(car_plate) if action == "fill" else None
+            exists = FuelOutflow.query.filter_by(
                 barrel_id=barrel.id,
+                vehicle_id=vehicle.id if vehicle else None,
                 liters=amount,
-                price_per_liter=0.0,
-                total=0.0,
-                date=_parse_dt(created_at) or datetime.utcnow(),
-            )
-        )
+                date=when,
+            ).first()
+            if exists is None:
+                db.session.add(
+                    FuelOutflow(
+                        barrel_id=barrel.id,
+                        vehicle_id=vehicle.id if vehicle else None,
+                        liters=amount,
+                        cost_per_liter=0.0,
+                        total=0.0,
+                        date=when,
+                    )
+                )
         count += 1
     db.session.commit()
+    _recalculate_barrel_levels()
     return count
 
 
