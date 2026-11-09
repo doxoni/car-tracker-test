@@ -102,13 +102,15 @@ def test_bot_registers_level_commands(monkeypatch):
     application = build_app()
     commands = set()
     for handler in application.handlers[0]:
-        for group in handler.commands:
+        # Не все обработчики - команды (например, выбор языка по кнопке).
+        for group in getattr(handler, "commands", []):
             commands.add(group)
 
     assert "yuser_1" in commands
     assert "admunus2" in commands
     assert "fraeadmin3" in commands
     assert "admin" in commands
+    assert "language" in commands
     # Старых названий быть не должно - команды нестандартные.
     assert "admin2" not in commands
     assert "admin3" not in commands
