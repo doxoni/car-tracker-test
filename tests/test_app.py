@@ -41,6 +41,126 @@ def test_health(client):
     assert data["status"] == "ok"
 
 
+def test_health_contains_night_block(client):
+    """/api/health показывает состояние ночной паузы."""
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    night = response.get_json()["night"]
+    assert night["tz"] == "Europe/Kyiv"
+    assert night["start_hour"] == 2
+    assert night["end_hour"] == 5
+    assert isinstance(night["active"], bool)
+    assert night["local_time"]
+    assert night["next_change"]
+
+
+def test_is_night_inside_window():
+    """Внутри окна 02:00-05:00 по Киеву - ночь."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.night_mode import is_night
+
+    kyiv = ZoneInfo("Europe/Kyiv")
+    assert is_night(datetime(2026, 1, 15, 2, 0, tzinfo=kyiv)) is True
+    assert is_night(datetime(2026, 1, 15, 3, 30, tzinfo=kyiv)) is True
+    assert is_night(datetime(2026, 1, 15, 4, 59, tzinfo=kyiv)) is True
+
+
+def test_is_night_outside_window():
+    """Вне окна - не ночь. Границы: 02:00 входит, 05:00 - уже нет."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.night_mode import is_night
+
+    kyiv = ZoneInfo("Europe/Kyiv")
+    assert is_night(datetime(2026, 1, 15, 1, 59, tzinfo=kyiv)) is False
+    assert is_night(datetime(2026, 1, 15, 5, 0, tzinfo=kyiv)) is False
+    assert is_night(datetime(2026, 1, 15, 12, 0, tzinfo=kyiv)) is False
+    assert is_night(datetime(2026, 1, 15, 0, 30, tzinfo=kyiv)) is False
+
+
+def test_is_night_converts_utc_to_kyiv():
+    """Время в UTC переводится в киевское: 00:30 UTC зимой = 02:30 Киева."""
+    from datetime import datetime, timezone
+
+    from app.night_mode import is_night
+
+    # Зима: Киев на 2 часа впереди UTC. 00:30 UTC -> 02:30 киевского времени.
+    assert is_night(datetime(2026, 1, 15, 0, 30, tzinfo=timezone.utc)) is True
+    # За час до полуночи UTC ещё 01:30 киевского времени - не ночь.
+    assert is_night(datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)) is False
+    # Лето: Киев на 3 часа впереди UTC. 23:30 UTC -> 02:30 киевского.
+    assert is_night(datetime(2026, 7, 15, 23, 30, tzinfo=timezone.utc)) is True
+
+
+def test_night_info_reports_change_time():
+    """В night_info есть местное время и ближайшая смена окна."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.night_mode import night_info
+
+    kyiv = ZoneInfo("Europe/Kyiv")
+    info = night_info(datetime(2026, 1, 15, 2, 30, tzinfo=kyiv))
+    assert info["active"] is True
+    assert info["local_time"].startswith("2026-01-15 02:30")
+    # Ближайшая смена - конец окна в 05:00 того же дня.
+    assert info["next_change"].startswith("2026-01-15 05:00")
+
+    info_day = night_info(datetime(2026, 1, 15, 12, 0, tzinfo=kyiv))
+    assert info_day["active"] is False
+    # Ближайшая смена - начало окна в 02:00 следующего дня.
+    assert info_day["next_change"].startswith("2026-01-16 02:00")
+
+
+def test_bot_does_not_start_at_night(monkeypatch):
+    """Ночью бот не стартует: в состоянии статус night_mode."""
+    from app import bot_runner
+    from app.config import Config
+
+    monkeypatch.setattr(Config, "TELEGRAM_TOKEN", "123456:TESTTOKEN")
+    monkeypatch.setattr(bot_runner, "bot_enabled", lambda: True)
+    monkeypatch.setattr(Config, "NIGHT_MODE_ENABLED", True)
+    monkeypatch.setattr(Config, "NIGHT_START_HOUR", 2)
+    monkeypatch.setattr(Config, "NIGHT_END_HOUR", 5)
+    # Ночь: 03:00 по Киеву.
+    monkeypatch.setattr("app.night_mode.is_night", lambda *a, **k: True)
+    # Сторож ночного окна в тесте не нужен.
+    monkeypatch.setattr(bot_runner, "_ensure_night_watchdog", lambda: None)
+
+    thread = bot_runner.ensure_bot_started("test")
+    assert thread is None
+    assert bot_runner.BOT_STATE["status"] == "night_mode"
+    assert "ночная пауза" in bot_runner.BOT_STATE["stage"]
+
+
+def test_night_sleep_window_by_kyiv_time():
+    """Скрипт ночной паузы считает ночь по киевскому времени."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import night_sleep
+
+    kyiv = ZoneInfo("Europe/Kyiv")
+    assert night_sleep.is_night(datetime(2026, 1, 15, 2, 30, tzinfo=kyiv)) is True
+    assert night_sleep.is_night(datetime(2026, 1, 15, 5, 0, tzinfo=kyiv)) is False
+    assert night_sleep.is_night(datetime(2026, 1, 15, 12, 0, tzinfo=kyiv)) is False
+
+
+def test_wait_until_morning_skips_when_not_suspended(monkeypatch):
+    """Если сервис не усыплён, ждать до утра не нужно."""
+    import night_sleep
+
+    monkeypatch.setattr(night_sleep, "service_state", lambda key: {"suspended": "not_suspended"})
+    called = []
+    monkeypatch.setattr(night_sleep, "cmd_resume", lambda key: called.append(key) or 0)
+
+    assert night_sleep.cmd_wait_until_morning("test-key") == 0
+    assert called == []
+
+
 def test_health_db(client):
     """Отдельная проверка БД реально ходит в базу."""
     response = client.get("/api/health/db")

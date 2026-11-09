@@ -53,10 +53,14 @@ def health():
     Статус бота отдаём здесь же: логи Render через API не читаются,
     поэтому состояние бота - единственный способ понять, поднялся он
     или упал с ошибкой.
+
+    Блок "night" показывает, идёт ли сейчас ночная пауза (02:00-05:00
+    по Киеву) и когда она закончится.
     """
     from app.bot_runner import bot_state
+    from app.night_mode import night_info
 
-    return jsonify({"status": "ok", "bot": bot_state()})
+    return jsonify({"status": "ok", "bot": bot_state(), "night": night_info()})
 
 
 @bp.get("/health/db")

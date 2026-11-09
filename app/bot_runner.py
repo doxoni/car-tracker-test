@@ -30,8 +30,14 @@ BOT_STATE = {
 
 # Поток бота - чтобы health показывал, жив ли он.
 _bot_thread = None
+# Telegram-приложение и его event loop - нужны, чтобы остановить опрос
+# извне (например, когда наступила ночная пауза).
+_bot_app = None
+_bot_loop = None
 # Поток, который обновляет heartbeat: по нему видно, что бот работает.
 _heartbeat_thread = None
+# Поток-сторож ночного окна: он следит за временем и в 05:00 поднимает бота.
+_night_thread = None
 # Флаг: бот уже стартовал в этом процессе (чтобы не запустить дважды).
 _started = False
 # Когда последний раз пытались поднять бота: чтобы при падении не спамить
@@ -137,6 +143,94 @@ def bot_enabled() -> bool:
     return bool((Config.TELEGRAM_TOKEN or "").strip())
 
 
+# ---------- Ночная пауза ----------
+
+
+def _now_text() -> str:
+    """Текущее время в виде строки (для /api/health)."""
+    from datetime import datetime
+
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _night_end_text() -> str:
+    """Время окончания ночного окна словами: "05:00"."""
+    from app.config import Config
+
+    return f"{int(Config.NIGHT_END_HOUR):02d}:00"
+
+
+def _stop_bot_for_night() -> None:
+    """Остановить опрос Telegram, потому что наступило ночное окно.
+
+    Опрос останавливаем из event loop самого бота: stop_running() завершает
+    run_forever, после чего run_polling корректно гасит апдейты.
+    """
+    global _started
+
+    app = _bot_app
+    loop = _bot_loop
+    thread = _bot_thread
+    if app is None or loop is None or thread is None:
+        return
+    if not thread.is_alive():
+        return
+
+    try:
+        loop.call_soon_threadsafe(app.stop_running)
+    except Exception as exc:
+        print(f"🤖 Не удалось остановить бота на ночь: {exc}", flush=True)
+        return
+
+    # Ждём, пока опрос действительно завершится (обычно мгновенно).
+    thread.join(timeout=30)
+    with _start_lock:
+        _started = False
+        _bot_thread = None
+        _bot_app = None
+        _bot_loop = None
+    BOT_STATE["status"] = "night_mode"
+    BOT_STATE["stage"] = f"ночная пауза до {_night_end_text()} по Киеву"
+    BOT_STATE["updated_at"] = _now_text()
+    print("🤖 Бот остановлен: ночная пауза", flush=True)
+
+
+def _night_watchdog_loop() -> None:
+    """Сторож ночного окна.
+
+    Каждые полминуты смотрит на киевское время:
+      - если наступила ночь, а бот ещё работает - останавливает его;
+      - если ночь кончилась, а бот не работает - поднимает его снова.
+    Так бот сам засыпает в 02:00 и сам просыпается в 05:00, даже если
+    сервис всё это время жил.
+    """
+    from app.night_mode import is_night
+
+    while True:
+        try:
+            night = is_night()
+            alive = bool(_bot_thread and _bot_thread.is_alive())
+            if night and alive:
+                _stop_bot_for_night()
+            elif not night and not alive and bot_enabled():
+                ensure_bot_started("night_watchdog")
+        except Exception as exc:
+            print(f"⚠️ Сторож ночного окна: {exc}", flush=True)
+        time.sleep(30)
+
+
+def _ensure_night_watchdog() -> None:
+    """Запустить сторож ночного окна (один раз на процесс)."""
+    global _night_thread
+
+    if _night_thread is not None and _night_thread.is_alive():
+        return
+    _night_thread = threading.Thread(
+        target=_night_watchdog_loop, name="bot-night-watchdog", daemon=True
+    )
+    _night_thread.start()
+
+
 def _install_thread_excepthook():
     """Ловить исключения потоков, иначе они молча теряются.
 
@@ -169,9 +263,24 @@ def ensure_bot_started(source: str = "request"):
       - хук после форка - если приложение импортировали до форка;
       - before_request - запасной вариант, если хуки не сработали.
 
+    Ночью бот не стартует: ночное окно (по умолчанию 02:00-05:00 по Киеву)
+    проверяется здесь, в общем месте - иначе разные пути запуска вели бы
+    себя по-разному.
+
     Возвращает поток бота или None.
     """
     if not bot_enabled():
+        return None
+
+    _ensure_night_watchdog()
+
+    from app.night_mode import is_night
+
+    if is_night():
+        BOT_STATE["status"] = "night_mode"
+        BOT_STATE["stage"] = f"ночная пауза до {_night_end_text()} по Киеву"
+        BOT_STATE["updated_at"] = _now_text()
+        BOT_STATE["heartbeat"] = time.time()
         return None
 
     with _start_lock:
@@ -197,9 +306,14 @@ def reset_after_fork():
     запроса) - он уже выполняется в нужном процессе.
     """
     global _bot_thread, _heartbeat_thread, _started, _last_start_attempt, _start_lock
+    global _bot_app, _bot_loop, _night_thread
 
     _bot_thread = None
     _heartbeat_thread = None
+    _bot_app = None
+    _bot_loop = None
+    # Сторож ночного окна - тоже поток, в дочернем процессе его нет.
+    _night_thread = None
     _started = False
     _last_start_attempt = 0.0
     # Замок могли удерживать потоки родительского процесса - в дочернем
@@ -226,6 +340,7 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
     попадает в /api/health, чтобы было видно, где бот поднялся.
     """
     global _bot_thread, _heartbeat_thread, _started, _started_by, _last_start_attempt
+    global _bot_app, _bot_loop
     from datetime import datetime
 
     if not bot_enabled():
@@ -282,7 +397,12 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
             # python-telegram-bot внутри run_polling вызывает
             # asyncio.get_event_loop(). В потоке, где цикла ещё нет, это
             # ошибка - поэтому создаём цикл и делаем его текущим для потока.
-            asyncio.set_event_loop(asyncio.new_event_loop())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            # Сохраняем приложение и цикл: сторож ночного окна должен
+            # суметь остановить опрос снаружи потока бота.
+            _bot_app = bot_app
+            _bot_loop = loop
             _stage("запуск long polling")
             # stop_signals=None: ставить обработчики сигналов можно только
             # в главном потоке, а бот работает в отдельном.

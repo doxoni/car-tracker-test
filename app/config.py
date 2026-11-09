@@ -90,6 +90,19 @@ class Config:
     # Период синхронизации с Wialon (минуты)
     WIALON_SYNC_INTERVAL = int(os.getenv("WIALON_SYNC_INTERVAL", "15"))
 
+    # Ночная пауза: с NIGHT_START_HOUR до NIGHT_END_HOUR по часовому
+    # поясу NIGHT_TZ сервис спит, бот Telegram не отвечает.
+    # По умолчанию - 02:00-05:00 по Europe/Kyiv.
+    NIGHT_MODE_ENABLED = os.getenv("NIGHT_MODE_ENABLED", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    NIGHT_START_HOUR = int(os.getenv("NIGHT_START_HOUR", "2"))
+    NIGHT_END_HOUR = int(os.getenv("NIGHT_END_HOUR", "5"))
+    NIGHT_TZ = os.getenv("NIGHT_TZ", "Europe/Kyiv")
+
     # DEV режим: пропускает проверку Telegram initData, использует DEV_USER_ID
     DEV_MODE = os.getenv("DEV_MODE", "false").lower() in ("1", "true", "yes")
     DEV_USER_ID = int(os.getenv("DEV_USER_ID", "0"))
