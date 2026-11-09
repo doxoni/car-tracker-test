@@ -8,6 +8,7 @@
     python night_sleep.py suspend   # усыпить сервис (ночная пауза)
     python night_sleep.py resume    # разбудить сервис
     python night_sleep.py wait_until_morning  # дождаться 05:00 и разбудить
+    python night_sleep.py auto      # само решить по киевскому времени
     python night_sleep.py status    # показать состояние (без секретов)
 
 Ключ берётся из переменной окружения RENDER_API_KEY (в GitHub Actions это
@@ -46,6 +47,21 @@ NIGHT_END_HOUR = int(os.getenv("NIGHT_END_HOUR", "5"))
 
 
 # ---------- Вспомогательные функции ----------
+
+
+def say(text: str) -> None:
+    """Печать текста без падения на старой кодировке консоли.
+
+    В Windows-консоли по умолчанию стоит cp1251, где нет эмодзи и
+    галочек. Обычный print на таком терминале обрывается с
+    UnicodeEncodeError, поэтому непечатаемые символы заменяем.
+    """
+    try:
+        sys.stdout.write(text + "\n")
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        safe = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        sys.stdout.write(safe + "\n")
 
 
 def read_key() -> str:
@@ -133,12 +149,12 @@ def cmd_status(key: str) -> int:
     """Показать состояние сервиса и текущее киевское время."""
     state = service_state(key)
     if not state:
-        print("❌ Не удалось получить состояние сервиса")
+        say("❌ Не удалось получить состояние сервиса")
         return 1
-    print(f"Время по Киеву: {local_now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Ночное окно: {NIGHT_START_HOUR:02d}:00-{NIGHT_END_HOUR:02d}:00")
-    print(f"Сервис усыплён: {state.get('suspended')}")
-    print(f"Ветка: {state.get('branch')}")
+    say(f"Время по Киеву: {local_now().strftime('%Y-%m-%d %H:%M:%S')}")
+    say(f"Ночное окно: {NIGHT_START_HOUR:02d}:00-{NIGHT_END_HOUR:02d}:00")
+    say(f"Сервис усыплён: {state.get('suspended')}")
+    say(f"Ветка: {state.get('branch')}")
     return 0
 
 
@@ -151,11 +167,11 @@ def cmd_suspend(key: str) -> int:
     """
     state = service_state(key)
     if not state:
-        print("❌ Не удалось получить состояние сервиса")
+        say("❌ Не удалось получить состояние сервиса")
         return 1
 
     if state.get("suspended") == "suspended":
-        print("ℹ️ Сервис уже усыплён - ничего делать не нужно")
+        say("ℹ️ Сервис уже усыплён - ничего делать не нужно")
         return 0
 
     deploy = last_deploy(key)
@@ -164,10 +180,10 @@ def cmd_suspend(key: str) -> int:
     status = deploy.get("status", "")
 
     if status and status != "live":
-        print(f"⏳ Последний деплой в статусе {status} - пока не усыпляем сервис")
+        say(f"⏳ Последний деплой в статусе {status} - пока не усыпляем сервис")
         return 0
     if head and deployed_commit and head != deployed_commit:
-        print(
+        say(
             "⏳ В ветке есть незадеплоенный коммит - сервис усыплять нельзя "
             "(Render не деплоит в усыпленном состоянии)"
         )
@@ -175,9 +191,9 @@ def cmd_suspend(key: str) -> int:
 
     code, data = api("POST", f"/services/{SERVICE_ID}/suspend", key)
     if code >= 400:
-        print(f"❌ Не удалось усыпить сервис: {code} {str(data)[:200]}")
+        say(f"❌ Не удалось усыпить сервис: {code} {str(data)[:200]}")
         return 1
-    print(f"🌙 Сервис усыплён (код {code})")
+    say(f"🌙 Сервис усыплён (код {code})")
     return 0
 
 
@@ -185,17 +201,17 @@ def cmd_resume(key: str) -> int:
     """Разбудить сервис и дождаться, пока он начнёт отвечать."""
     state = service_state(key)
     if not state:
-        print("❌ Не удалось получить состояние сервиса")
+        say("❌ Не удалось получить состояние сервиса")
         return 1
 
     if state.get("suspended") != "suspended":
-        print("ℹ️ Сервис не усыплён - разбужать не нужно")
+        say("ℹ️ Сервис не усыплён - разбужать не нужно")
     else:
         code, data = api("POST", f"/services/{SERVICE_ID}/resume", key)
         if code >= 400:
-            print(f"❌ Не удалось разбудить сервис: {code} {str(data)[:200]}")
+            say(f"❌ Не удалось разбудить сервис: {code} {str(data)[:200]}")
             return 1
-        print(f"☀️ Сервис разбужен (код {code})")
+        say(f"☀️ Сервис разбужен (код {code})")
 
     # Ждём живости: после resume холодный старт занимает до минуты.
     for attempt in range(1, 21):
@@ -203,12 +219,56 @@ def cmd_resume(key: str) -> int:
             request = urllib.request.Request(HEALTH_URL, method="GET")
             with urllib.request.urlopen(request, timeout=30) as response:
                 if response.status == 200:
-                    print(f"✅ Сервис отвечает (попытка {attempt})")
+                    say(f"✅ Сервис отвечает (попытка {attempt})")
                     return 0
         except Exception:
             pass
         time.sleep(10)
-    print("⚠️ Сервис пока не отвечает - он проснётся с задержкой")
+    say("⚠️ Сервис пока не отвечает - он проснётся с задержкой")
+    return 0
+
+
+def cmd_auto(key: str) -> int:
+    """Самостоятельно привести сервис в нужное состояние.
+
+    Смысл: запланированные запуски GitHub Actions опаздывают на часы,
+    поэтому полагаться на точное время запуска нельзя. Эта команда
+    смотрит на киевское время и на реальное состояние сервиса:
+
+    - ночь (02:00-05:00): сервис должен спать - усыпляем его и ждём
+      утра, чтобы разбудить;
+    - день: если сервис остался усыпленным (например, ночной запуск
+      не отработал) - разбуживаем его.
+
+    Благодаря этому любой запуск workflow в любое время оставляет
+    сервис в правильном состоянии.
+    """
+    now = local_now()
+    state = service_state(key)
+    if not state:
+        say("❌ Не удалось получить состояние сервиса")
+        return 1
+
+    sleeping = state.get("suspended") == "suspended"
+    say(f"Время по Киеву: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    if is_night(now):
+        if not sleeping:
+            say("🌙 Ночное окно - усыпляем сервис")
+            cmd_suspend(key)
+            state = service_state(key)
+            sleeping = state.get("suspended") == "suspended"
+        if sleeping:
+            say("💤 Сервис усыплён - ждём утра")
+            return cmd_wait_until_morning(key)
+        say("⏳ Усыпить не удалось - вернёмся к этому на следующем запуске")
+        return 0
+
+    if sleeping:
+        say("☀️ Сервис остался усыпленным - будим его")
+        return cmd_resume(key)
+
+    say("✅ Сервис работает, всё в порядке")
     return 0
 
 
@@ -223,7 +283,7 @@ def cmd_wait_until_morning(key: str) -> int:
     """
     state = service_state(key)
     if state.get("suspended") != "suspended":
-        print("ℹ️ Сервис не усыплён - ждать нечего")
+        say("ℹ️ Сервис не усыплён - ждать нечего")
         return 0
     while True:
         now = local_now()
@@ -234,12 +294,12 @@ def cmd_wait_until_morning(key: str) -> int:
             NIGHT_END_HOUR * 60 - now.hour * 60 - now.minute
         )
         wait_seconds = max(30, min(600, minutes_left * 60))
-        print(
+        say(
             f"⏳ Сейчас {now.strftime('%H:%M:%S')}, ждём {wait_seconds} с "
             f"до {NIGHT_END_HOUR:02d}:00 по Киеву"
         )
         time.sleep(wait_seconds)
-    print(f"☀️ Наступило {NIGHT_END_HOUR:02d}:00 по Киеву - будим сервис")
+    say(f"☀️ Наступило {NIGHT_END_HOUR:02d}:00 по Киеву - будим сервис")
     return cmd_resume(key)
 
 
@@ -248,7 +308,7 @@ def main() -> int:
     command = (sys.argv[1] if len(sys.argv) > 1 else "status").strip()
     key = read_key()
     if not key:
-        print("❌ Нет ключа Render API (RENDER_API_KEY или render_key.txt)")
+        say("❌ Нет ключа Render API (RENDER_API_KEY или render_key.txt)")
         return 1
 
     if command == "suspend":
@@ -257,9 +317,14 @@ def main() -> int:
         return cmd_resume(key)
     if command == "wait_until_morning":
         return cmd_wait_until_morning(key)
+    if command == "auto":
+        return cmd_auto(key)
     if command == "status":
         return cmd_status(key)
-    print("❌ Неизвестная команда. Доступны: suspend, resume, wait_until_morning, status")
+    say(
+        "❌ Неизвестная команда. Доступны: suspend, resume, "
+        "wait_until_morning, auto, status"
+    )
     return 1
 
 
