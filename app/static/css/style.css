@@ -1,9 +1,18 @@
 /* -*- coding: utf-8 -*-
-   Car Tracker — тёмный дизайн Mini App (перенесён из рабочего index.html).
-   Все цвета — через переменные :root, чтобы тема Telegram могла их переопределить.
+   Car Tracker — дизайн Mini App (перенесён из старого index.html).
+
+   Идея переноса: берём внешний вид из старой версии приложения
+   (карточки, кнопки, поля, списки, тост, пустые состояния), а логику
+   и структуру экранов оставляем текущие. Поэтому часть правил ниже
+   повторяет классы старого файла (car-row, item, chip, toast), а часть
+   описывает наши компоненты (vehicle-card, expense-row, bottom-nav) в том
+   же стиле.
+
+   Все цвета — через переменные :root, чтобы тема Telegram могла их
+   переопределить. Базовые цвета тёмные, как в старом приложении:
+   вне Telegram приложение выглядит так же, как раньше.
 */
 
-/* ---------- Токены темы ---------- */
 :root {
   --bg: #212121;
   --bg2: #0f0f0f;
@@ -16,7 +25,7 @@
   --ok: #4caf50;
   --field: #1c1c1c;
 
-  /* новые переменные (тему Telegram переопределяет) */
+  /* производные цвета (тема Telegram переопределяет их из JS) */
   --text2: #b8b8b8;
   --line: rgba(255, 255, 255, .14);
   --chip: rgba(255, 255, 255, .08);
@@ -45,61 +54,11 @@
   --font-size-2xl: 28px;
 }
 
-/* ---------- Тема Telegram: светлая и тёмная ---------- */
-/* Классы tg-light / tg-dark ставит клиент Mini App.
-   Базовые цвета заданы явно: переменные --tg-theme-bg-color и
-   --tg-theme-text-color приложение переопределяет своими, а акценты
-   берём из темы Telegram. */
-html.tg-light {
-  color-scheme: light;
-  --bg: #ffffff;
-  --bg2: #f2f2f7;
-  --text: #000000;
-  --hint: var(--tg-theme-hint-color, #707579);
-  --btn: var(--tg-theme-button-color, #3ba3ec);
-  --btn_text: var(--tg-theme-button-text-color, #ffffff);
-  --card: var(--tg-theme-section-bg-color, #ffffff);
-  --field: var(--tg-theme-secondary-bg-color, #f2f2f7);
-  --text2: var(--tg-theme-subtitle-text-color, #707579);
-  --line: rgba(0, 0, 0, .12);
-  --chip: rgba(0, 0, 0, .06);
-  --chip_text: #4a4a4a;
-  --btn2: var(--tg-theme-secondary-bg-color, #e7e7ec);
-  --btn2_text: var(--tg-theme-button-text-color, #000000);
-  --btn_faint: rgba(59, 163, 236, .22);
-  --danger_soft: rgba(229, 57, 53, .12);
-  --shadow: 0 1px 2px rgba(0, 0, 0, .10);
-}
-html.tg-dark {
-  color-scheme: dark;
-}
-/* Пока класс не выставлен — ориентируемся на системную тему: в светлой
-   теме Telegram приложение не должно выглядеть чёрным пятном. */
-@media (prefers-color-scheme: light) {
-  html:not(.tg-dark) {
-    color-scheme: light;
-    --bg: #ffffff;
-    --bg2: #f2f2f7;
-    --text: #000000;
-    --hint: var(--tg-theme-hint-color, #707579);
-    --btn: var(--tg-theme-button-color, #3ba3ec);
-    --btn_text: var(--tg-theme-button-text-color, #ffffff);
-    --card: var(--tg-theme-section-bg-color, #ffffff);
-    --field: var(--tg-theme-secondary-bg-color, #f2f2f7);
-    --text2: var(--tg-theme-subtitle-text-color, #707579);
-    --line: rgba(0, 0, 0, .12);
-    --chip: rgba(0, 0, 0, .06);
-    --chip_text: #4a4a4a;
-    --btn2: var(--tg-theme-secondary-bg-color, #e7e7ec);
-    --btn2_text: var(--tg-theme-button-text-color, #000000);
-    --btn_faint: rgba(59, 163, 236, .22);
-    --danger_soft: rgba(229, 57, 53, .12);
-    --shadow: 0 1px 2px rgba(0, 0, 0, .10);
-  }
-}
+html.tg-dark { color-scheme: dark; }
+html.tg-light { color-scheme: light; }
 
 /* ---------- База ---------- */
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; -webkit-tap-color: transparent; -webkit-tap-highlight-color: transparent; }
 html, body { touch-action: manipulation; }
 html { background: var(--bg); }
 body {
@@ -124,13 +83,14 @@ button, input, select, textarea, .vehicle-card, .expense-row { touch-action: man
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 .tg-header-left {
-  font-weight: 600;
-  font-size: 16px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.3px;
   white-space: nowrap;
 }
 .tg-header-right {
@@ -158,6 +118,13 @@ button, input, select, textarea, .vehicle-card, .expense-row { touch-action: man
   padding: 14px 16px calc(86px + env(safe-area-inset-bottom));
 }
 
+/* ---------- Заголовки ---------- */
+h1 { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin: 2px 0 16px; }
+h2 {
+  font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--hint); margin: 22px 0 10px;
+}
+
 /* ---------- Карточки ---------- */
 .card {
   background: var(--card);
@@ -173,6 +140,24 @@ button, input, select, textarea, .vehicle-card, .expense-row { touch-action: man
   text-transform: uppercase;
   color: var(--hint);
   margin-bottom: 10px;
+}
+
+/* ---------- Полоска загрузки ---------- */
+/* Пока идёт запрос — видно, что приложение ждёт. */
+.loadbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 80;
+  background: var(--btn);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+.loadbar.on { opacity: 1; animation: loadbar 1s ease-in-out infinite; }
+@keyframes loadbar {
+  0% { transform: translateX(-70%); }
+  100% { transform: translateX(70%); }
 }
 
 /* ---------- Кнопки ---------- */
@@ -191,11 +176,7 @@ button {
 }
 button:active { opacity: .8; }
 button:disabled { opacity: .5; }
-button.ghost {
-  background: var(--btn2);
-  color: var(--btn2_text);
-  border: 1px solid var(--line);
-}
+button.ghost { background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line); }
 button.danger { background: var(--danger); color: #ffffff; }
 .btn {
   display: inline-flex;
@@ -225,15 +206,17 @@ button.danger { background: var(--danger); color: #ffffff; }
 button:focus-visible { outline: 2px solid var(--btn); outline-offset: 2px; }
 
 /* ---------- Формы ---------- */
-.field { margin-bottom: 16px; }
+.field { margin-bottom: 14px; }
 label,
 .field-label {
   display: block;
   color: var(--hint);
   font-size: 13px;
   font-weight: 500;
-  margin-bottom: 6px;
+  margin: 14px 0 6px;
 }
+.card > label:first-child,
+.field > .field-label:first-child { margin-top: 0; }
 input, select, textarea {
   width: 100%;
   font: inherit;
@@ -279,12 +262,26 @@ select {
   padding-right: 44px;
 }
 .field-input,
-.field-select {
-  width: 100%;
-}
+.field-select { width: 100%; }
 /* Поле комментария — выше обычного поля. */
 textarea.field-input { min-height: 100px; }
+.hint { color: var(--hint); font-size: 13px; margin-top: 6px; }
+.total { color: var(--hint); font-size: 13px; margin-top: 8px; }
+.err { color: var(--danger); font-size: 13px; margin-top: 10px; }
 small { color: var(--hint); font-size: 13px; }
+
+/* ---------- Чипы ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip {
+  background: var(--chip);
+  color: var(--chip_text);
+  font-size: 12.5px;
+  line-height: 1.35;
+  padding: 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.chip-accent { background: var(--btn); color: var(--btn_text); font-weight: 600; }
 
 /* ---------- Нижняя навигация ---------- */
 .bottom-nav {
@@ -299,8 +296,6 @@ small { color: var(--hint); font-size: 13px; }
   background: var(--bg2);
   border-top: 1px solid var(--line);
   padding: 0 4px env(safe-area-inset-bottom);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
 }
 .nav-item {
   flex: 1;
@@ -320,7 +315,7 @@ small { color: var(--hint); font-size: 13px; }
 .nav-icon { font-size: 20px; line-height: 1; }
 .nav-label { font-size: 11px; }
 
-/* ---------- Фура ---------- */
+/* ---------- Фура (как car-row в старом приложении) ---------- */
 .vehicle-card {
   display: flex;
   align-items: center;
@@ -335,32 +330,33 @@ small { color: var(--hint); font-size: 13px; }
 .vehicle-card:active { opacity: .85; transform: scale(.99); }
 .vehicle-icon {
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
   background: var(--chip);
   color: var(--text);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 19px;
 }
 .vehicle-info { flex: 1; min-width: 0; }
 .vehicle-name {
+  font-size: 17px;
   font-weight: 600;
-  font-size: 16px;
+  letter-spacing: -.2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.vehicle-plate { color: var(--hint); font-size: 13px; }
+.vehicle-plate { color: var(--hint); font-size: 13px; margin-top: 3px; }
 .vehicle-status {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
   color: var(--hint);
-  font-size: 12px;
+  font-size: 12.5px;
   white-space: nowrap;
 }
 .vehicle-status-value {
@@ -369,17 +365,16 @@ small { color: var(--hint); font-size: 13px; }
   font-size: 15px;
 }
 
-/* ---------- Расход ---------- */
+/* ---------- Расход (как item в старом приложении) ---------- */
 .expense-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   background: var(--card);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   padding: 12px 14px;
   margin-bottom: 8px;
-  box-shadow: var(--shadow);
 }
 .expense-left {
   display: flex;
@@ -408,19 +403,20 @@ small { color: var(--hint); font-size: 13px; }
 .expense-amount { font-weight: 600; font-size: 15px; }
 .expense-date { color: var(--hint); font-size: 12.5px; }
 
-/* ---------- Бейджи ---------- */
+/* ---------- Бейджи (как chip) ---------- */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
-  font-size: 12px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  line-height: 1.35;
   border-radius: 999px;
   background: var(--chip);
   color: var(--chip_text);
   white-space: nowrap;
 }
 .badge-primary { background: var(--btn); color: var(--btn_text); font-weight: 600; }
-.badge-info { background: rgba(90, 200, 250, .16); color: #90caf9; }
+.badge-info { background: var(--btn_faint); color: var(--btn); }
 .badge-warning { background: rgba(255, 193, 7, .16); color: #ffd54f; }
 .badge-danger { background: var(--danger_soft); color: #ff8a80; }
 .badge-success { background: rgba(76, 175, 80, .16); color: #81c784; }
@@ -430,7 +426,7 @@ small { color: var(--hint); font-size: 13px; }
 .barrel-card {
   background: var(--card);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 14px 16px;
   margin-bottom: 10px;
   box-shadow: var(--shadow);
 }
@@ -440,7 +436,7 @@ small { color: var(--hint); font-size: 13px; }
   justify-content: space-between;
   gap: 12px;
 }
-.barrel-type { font-size: 15px; font-weight: 600; color: var(--text); }
+.barrel-type { font-size: 17px; font-weight: 600; color: var(--text); }
 /* Тип топлива подсказывает цвет — как в исходной бочке. */
 .barrel-type.diesel { color: #4fc3f7; }
 .barrel-type.petrol { color: #66bb6a; }
@@ -450,14 +446,15 @@ small { color: var(--hint); font-size: 13px; }
   align-items: flex-end;
   gap: 2px;
   color: var(--hint);
-  font-size: 12px;
+  font-size: 12.5px;
   white-space: nowrap;
 }
 .barrel-stats-value { color: var(--text); font-weight: 600; font-size: 15px; }
 .barrel-level-wrap {
   height: 10px;
-  margin-top: 10px;
-  background: var(--chip);
+  margin-top: 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -476,6 +473,22 @@ small { color: var(--hint); font-size: 13px; }
   transition: width .25s ease;
 }
 .barrel-level-fill.low { background: linear-gradient(90deg, #ff8a65, #e53935); }
+
+/* ---------- Статистика (как stat в старом приложении) ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.stat {
+  background: var(--chip);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.stat-label { color: var(--hint); font-size: 12px; margin-bottom: 2px; }
+.stat-value { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
+.stat-value.small { font-size: 14px; }
 
 /* ---------- Графики ---------- */
 .chart-wrap {
@@ -522,17 +535,46 @@ small { color: var(--hint); font-size: 13px; }
 .w-60 { width: 60%; }
 .w-80 { width: 80%; }
 
-/* ---------- Тост ---------- */
-/* display управляется из JS (showFlash), поэтому его не трогаем. */
+/* ---------- Тост (как в старом приложении) ---------- */
+/* Показ и скрытие управляет JS (showFlash). */
 #flash {
-  background: var(--card) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 14px !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, .3) !important;
-  font-size: 14px;
+  position: fixed;
+  left: 50%;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  top: auto;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 12px 18px;
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .3);
+  max-width: 88%;
+  text-align: center;
   z-index: 50;
+  font-size: 14px;
 }
+
+/* ---------- Спиннер ---------- */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--btn);
+  animation: spin .8s linear infinite;
+}
+/* Спиннер прямо в кнопке: пока идёт сохранение. */
+.spinner.light {
+  display: inline-block;
+  vertical-align: middle;
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+  border-color: rgba(255, 255, 255, .35);
+  border-top-color: #fff;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Кнопка Telegram скрыта: свою кнопку рисует клиент. */
 #main-button-wrap { display: none; }
@@ -555,7 +597,6 @@ small { color: var(--hint); font-size: 13px; }
   gap: var(--spacing-sm, 8px);
 }
 .filter-actions .btn {
-  width: auto;
   flex: 1 1 0;
 }
 

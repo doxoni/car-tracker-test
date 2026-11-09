@@ -116,6 +116,10 @@
       if (tg.setBackgroundColor && bg) tg.setBackgroundColor(bg);
       if (tg.setHeaderColor && bg) tg.setHeaderColor(bg);
     } catch (error) { /* старые версии клиента - не критично */ }
+
+    // Цвет панели браузера - как в старой версии приложения.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && bg) meta.setAttribute('content', bg);
   }
 
   applyTheme();
@@ -174,7 +178,23 @@
     const headers = Object.assign({}, opts.headers || {});
     if (INIT_DATA) headers['X-Telegram-Init-Data'] = INIT_DATA;
     opts.headers = headers;
-    return fetch(url, opts);
+    startWait();
+    return fetch(url, opts).finally(stopWait);
+  }
+
+  // Полоска загрузки сверху: пока идёт запрос - видно, что приложение ждёт.
+  let pendingRequests = 0;
+  function startWait() {
+    pendingRequests += 1;
+    const bar = document.getElementById('loadbar');
+    if (bar) bar.classList.add('on');
+  }
+  function stopWait() {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    if (!pendingRequests) {
+      const bar = document.getElementById('loadbar');
+      if (bar) bar.classList.remove('on');
+    }
   }
 
   async function initAuth() {
