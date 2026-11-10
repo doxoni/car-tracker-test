@@ -101,6 +101,11 @@ Render API полностью останавливает контейнер (л�
 `/api/health`, и сам Render стучится в него постоянно, поэтому от простоя
 сервис не засыпает.
 
+Сервис: `car-tracker-test`, регион `frankfurt` (Германия),
+ID `srv-dbp4hldbedkc73flm7s0`, адрес `https://car-tracker-test.onrender.com`.
+ID зашит в `night_sleep.py` - если сервис пересоздать на Render, ID
+поменяется и ночной сон перестанет работать, пока не поправить строку.
+
 Скрипт `night_sleep.py`:
 
 | Команда | Что делает |
@@ -128,10 +133,12 @@ Actions опаздывают на часы. Команда `auto` смотрит
 ### Правило о workflow-файлах
 
 Файлы `.github/workflows/*.yml` GitHub не примет без scope `workflow` у
-токена: push будет отклонён. Содержимое workflow менять через REST API
-нельзя (тот же scope), а вот включить/выключить workflow через
-`PUT .../actions/workflows/<file>/enable` можно - это используется как
-запасной вариант, если ночной workflow мешает.
+токена: push будет отклонён, а содержимое workflow не поменять через
+REST API (тот же scope). Сейчас у токена `gh` scope `workflow` есть, но
+если он отвалится - получить новый можно через `gh auth refresh -h
+github.com -s workflow`. Включать/выключать workflow можно без этого
+scope: `PUT .../actions/workflows/<file>/enable` - запасной вариант,
+если ночной workflow мешает.
 
 ## Стиль кода и соглашения по именам
 
