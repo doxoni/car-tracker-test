@@ -59,6 +59,8 @@ def test_only_allowed_vars_are_sent(deploy, tmp_path):
         "ADMIN_TELEGRAM_ID",
         "WHITELISTED_TELEGRAM_IDS",
         "OPEN_ACCESS",
+        "TELEGRAM_MODE",
+        "TELEGRAM_WEBHOOK_SECRET",
     }
     assert "SECRET_KEY" not in values
 
@@ -113,3 +115,28 @@ def test_check_token_rejects_garbage(monkeypatch):
     monkeypatch.setattr(deploy_render.requests, "get", lambda *args, **kwargs: FakeResponse())
     assert deploy_render.check_token("123:BROKEN") is False
     assert deploy_render.check_token("") is False
+
+
+def test_webhook_secret_is_generated(deploy, tmp_path):
+    """Если секрета нет - он генерируется и попадает в значения."""
+    values = deploy.ensure_webhook_secret({})
+
+    secret = values.get("TELEGRAM_WEBHOOK_SECRET")
+    assert secret
+    assert len(secret) >= 20
+    assert values.get("TELEGRAM_MODE") == "webhook"
+
+    # Секрет должен сохраниться, чтобы при следующем деплое не сменился.
+    env_file = tmp_path / "render_env.txt"
+    assert env_file.exists()
+    assert "TELEGRAM_WEBHOOK_SECRET" in env_file.read_text(encoding="utf-8")
+
+
+def test_existing_webhook_secret_is_kept(deploy, tmp_path):
+    """Готовый секрет не меняется - иначе Telegram перестанет доставлять."""
+    values = deploy.ensure_webhook_secret(
+        {"TELEGRAM_WEBHOOK_SECRET": "стабильный-секрет"}
+    )
+
+    assert values["TELEGRAM_WEBHOOK_SECRET"] == "стабильный-секрет"
+    assert not (tmp_path / "render_env.txt").exists()

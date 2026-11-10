@@ -71,6 +71,9 @@ telegram-webapp-session
 render_key.txt
 render_env.txt
 
+# UptimeRobot
+uptime_key.txt
+
 # GitHub
 github_token.txt
 

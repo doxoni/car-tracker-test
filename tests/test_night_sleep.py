@@ -2,7 +2,8 @@
 """Тесты ночной паузы сервиса: команда auto и решение по киевскому времени.
 
 Проверяем, что:
-- ночью сервис усыпляется;
+- ночью сервис не усыпляется жёстко (он спит сам);
+- ночью сервис, усыпленный вручную, ждёт утра;
 - днём усыпленный сервис разбужается;
 - в любое время суток состояние сервиса приводится к правильному.
 
@@ -91,8 +92,9 @@ def test_is_night_window(monkeypatch) -> None:
     assert night_sleep.is_night(datetime(2026, 1, 15, 5, 0, tzinfo=tz)) is False
 
 
-def test_auto_suspends_at_night(fake, monkeypatch) -> None:
-    """Ночью сервис усыпляется."""
+def test_auto_does_not_suspend_at_night(fake, monkeypatch) -> None:
+    """Ночью сервис не трогаем: он спит сам, а жёсткий suspend мешает
+    проснуться по запросу."""
     tz = night_sleep.TZ
     _set_time(monkeypatch, datetime(2026, 1, 15, 2, 30, tzinfo=tz))
     monkeypatch.setattr(night_sleep, "cmd_wait_until_morning", lambda key: 0)
@@ -100,8 +102,8 @@ def test_auto_suspends_at_night(fake, monkeypatch) -> None:
     result = night_sleep.cmd_auto(KEY)
 
     assert result == 0
-    assert fake.suspended is True
-    assert ("POST", f"/services/{night_sleep.SERVICE_ID}/suspend") in fake.calls
+    assert fake.suspended is False
+    assert not [call for call in fake.calls if call[0] == "POST"]
 
 
 def test_auto_resumes_in_the_morning(fake, monkeypatch) -> None:
@@ -131,8 +133,9 @@ def test_auto_keeps_awake_service_awake(fake, monkeypatch) -> None:
 
 
 def test_auto_at_night_waits_for_morning(fake, monkeypatch) -> None:
-    """Ночью после усыпления ждём утра, чтобы разбудить сервис."""
+    """Ночью сервис, усыпленный вручную, ждёт утра."""
     tz = night_sleep.TZ
+    fake.suspended = True
     _set_time(monkeypatch, datetime(2026, 1, 15, 2, 30, tzinfo=tz))
     waited = {"value": False}
 

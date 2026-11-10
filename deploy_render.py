@@ -152,8 +152,36 @@ def read_render_env() -> dict:
         "ADMIN_TELEGRAM_ID",
         "WHITELISTED_TELEGRAM_IDS",
         "OPEN_ACCESS",
+        "TELEGRAM_MODE",
+        "TELEGRAM_WEBHOOK_SECRET",
     )
     return {k: v for k, v in values.items() if k in allowed}
+
+
+def ensure_webhook_secret(values: dict) -> dict:
+    """Задать режим бота и секрет вебхука.
+
+    Секрет нужен, чтобы чужие запросы не притворялись сообщениями от
+    Telegram. Если его нет - генерируем и сохраняем в render_env.txt
+    (файл в .gitignore, в Git секрет не попадает). Секрет должен быть
+    один и тот же при каждом деплое, иначе Telegram перестанет
+    доставлять обновления.
+    """
+    import secrets
+
+    values = dict(values)
+    values.setdefault("TELEGRAM_MODE", "webhook")
+
+    secret = (values.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        secret = secrets.token_urlsafe(24)
+        env_file = ROOT / "render_env.txt"
+        with env_file.open("a", encoding="utf-8") as file:
+            file.write(f"\n# Секрет вебхука Telegram (создан автоматически).\n")
+            file.write(f"TELEGRAM_WEBHOOK_SECRET={secret}\n")
+        print("  Секрет вебхука сгенерирован и сохранён в render_env.txt")
+    values["TELEGRAM_WEBHOOK_SECRET"] = secret
+    return values
 
 
 def check_token(token: str) -> bool:
@@ -460,6 +488,12 @@ def main():
         "BOT_ENABLED": "1",
     }
     values.update(extra)
+    # Бот в режиме webhook + секрет вебхука.
+    values = ensure_webhook_secret(values)
+    # Адрес вебхука: Telegram шлёт обновления прямо сюда.
+    values.setdefault(
+        "TELEGRAM_WEBHOOK_URL", "https://car-tracker-test.onrender.com/telegram/webhook"
+    )
 
     # Токен бота проверяем до постановки: нерабочий токен ломает и бота,
     # и Mini App (подпись initData не сойдётся). Если токен не проходит

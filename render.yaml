@@ -16,6 +16,16 @@ services:
     # конфликт опроса Telegram. Потоки внутри воркера - многопоточность.
     startCommand: gunicorn -c gunicorn.conf.py --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT wsgi:app
     envVars:
+      # Бот в режиме webhook: сообщение в Telegram поднимает спящий
+      # контейнер, поэтому сервис может спать и не тратить часы тарифа.
+      - key: TELEGRAM_MODE
+        value: webhook
+      # Секрет вебхука. Ставится скриптом deploy_render.py, в Git его нет.
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      # Адрес вебхука - сообщения Telegram приходят прямо сюда.
+      - key: TELEGRAM_WEBHOOK_URL
+        value: https://car-tracker-test.onrender.com/telegram/webhook
       # Строка подключения к PostgreSQL.
       # Ставится автоматически скриптом deploy_render.py.
       - key: DATABASE_URL

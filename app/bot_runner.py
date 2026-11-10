@@ -170,8 +170,9 @@ def bot_ready() -> bool:
 
 
 def bot_app_instance():
-    """Приложение python-telegram-bot (нужно для разбора обновления)."""
-    return _bot_app
+    """Объект telegram.Bot (нужен для разбора обновления)."""
+    app = _bot_app
+    return getattr(app, "bot", None) if app is not None else None
 
 
 def enqueue_update(update) -> bool:
@@ -409,10 +410,15 @@ def webhook_url() -> str:
     from app.config import Config
 
     url = (Config.TELEGRAM_WEBHOOK_URL or "").strip()
-    if url:
-        return url
-    base = (Config.APP_URL or "").strip().rstrip("/")
-    return f"{base}/telegram/webhook"
+    if not url:
+        base = (Config.APP_URL or "").strip().rstrip("/")
+        # APP_URL на Render приходит из свойства host - без схемы.
+        if not base.startswith("http"):
+            base = f"https://{base}"
+        url = f"{base}/telegram/webhook"
+    if not url.startswith("http"):
+        url = f"https://{url}"
+    return url
 
 
 def _run_webhook(bot_app, loop) -> None:
@@ -432,14 +438,16 @@ def _run_webhook(bot_app, loop) -> None:
 
     async def _main():
         await bot_app.initialize()
-        # post_init при initialize() не вызывается - зовём сами.
-        if bot_app.post_init is not None:
-            await bot_app.post_init(bot_app)
         await bot_app.bot.set_webhook(
             webhook_url(),
             secret_token=(Config.TELEGRAM_WEBHOOK_SECRET or "").strip() or None,
         )
         await bot_app.start()
+        # post_init при initialize() не вызывается - зовём сами, и только
+        # теперь: статус "running" означает, что бот уже готов принимать
+        # обновления.
+        if bot_app.post_init is not None:
+            await bot_app.post_init(bot_app)
         # Ждём, пока контейнер не остановят.
         while True:
             await asyncio.sleep(3600)
