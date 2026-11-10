@@ -110,3 +110,67 @@ class _FakeBot:
 
     def get_id(self):
         return 1
+
+
+def test_bot_app_is_stored_globally():
+    """Приложение и цикл бота должны быть глобальными.
+
+    Если поток бота присвоит их как локальные переменные, вебхук не
+    найдёт бота и будет отвечать 503.
+    """
+    import inspect
+
+    from app import bot_runner
+
+    source = inspect.getsource(bot_runner.start_bot_thread)
+    run_function = source.split("def _run():", 1)[1]
+    globals_line = [
+        line.strip()
+        for line in run_function.splitlines()
+        if line.strip().startswith("global ")
+    ]
+    assert globals_line, "в _run нет global - бот не найдётся в вебхуке"
+    declared = " ".join(globals_line)
+    assert "_bot_app" in declared
+    assert "_bot_loop" in declared
+
+
+def test_enqueue_update_needs_running_loop(monkeypatch):
+    """Без работающего цикла обновление принять нельзя."""
+    from app import bot_runner
+
+    monkeypatch.setattr(bot_runner, "_bot_app", None)
+    monkeypatch.setattr(bot_runner, "_bot_loop", None)
+
+    assert bot_runner.enqueue_update(object()) is False
+
+
+def test_enqueue_update_puts_into_queue(monkeypatch):
+    """Обновление попадает в очередь бота."""
+    import asyncio
+    import threading
+    import time
+
+    from app import bot_runner
+
+    loop = asyncio.new_event_loop()
+    queue = asyncio.Queue()
+
+    class FakeApp:
+        update_queue = queue
+
+    monkeypatch.setattr(bot_runner, "_bot_app", FakeApp())
+    monkeypatch.setattr(bot_runner, "_bot_loop", loop)
+
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        assert bot_runner.enqueue_update("обновление") is True
+        deadline = time.time() + 5
+        while time.time() < deadline and queue.empty():
+            time.sleep(0.05)
+        assert queue.get_nowait() == "обновление"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=5)
+        loop.close()

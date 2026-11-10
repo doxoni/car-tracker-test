@@ -16,7 +16,9 @@ from flask import Blueprint, jsonify, request
 bp = Blueprint("telegram", __name__, url_prefix="/telegram")
 
 # Сколько ждём готовности бота после пробуждения контейнера, секунд.
-BOT_READY_TIMEOUT = 25
+# Telegram не ждёт ответ вебхука слишком долго - не успел бот за это
+# время, отвечаем 503, и Telegram повторит доставку.
+BOT_READY_TIMEOUT = 15
 
 
 def _wait_for_bot(timeout: float = BOT_READY_TIMEOUT) -> bool:
