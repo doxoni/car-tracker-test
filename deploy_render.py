@@ -236,7 +236,7 @@ def create_service(owner_id: str, key: str) -> dict:
             "runtime": "python",
             "plan": SERVICE_PLAN,
             "numInstances": 1,
-            "region": "oregon",
+            "region": "frankfurt",
             "healthCheckPath": "/api/health",
             "envSpecificDetails": {
                 "buildCommand": "pip install -r requirements.txt",
@@ -269,7 +269,7 @@ def update_start_command(service_id: str, owner_id: str, key: str) -> bool:
                 "runtime": service_details.get("runtime") or "python",
                 "plan": service_details.get("plan") or SERVICE_PLAN,
                 "numInstances": service_details.get("numInstances") or 1,
-                "region": service_details.get("region") or "oregon",
+                "region": service_details.get("region") or "frankfurt",
                 "healthCheckPath": service_details.get("healthCheckPath")
                 or "/api/health",
                 "envSpecificDetails": {

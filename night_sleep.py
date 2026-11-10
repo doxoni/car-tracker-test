@@ -29,7 +29,7 @@ API = "https://api.render.com/v1"
 ROOT = Path(__file__).resolve().parent
 
 # ID веб-сервиса car-tracker-test на Render.
-SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "srv-dboda0egekts73eafuc0")
+SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "srv-dbp4hldbedkc73flm7s0")
 # Сервис, за которым следим (нужен, чтобы найти его по имени при смене ID).
 SERVICE_NAME = "car-tracker-test"
 # Публичный репозиторий: HEAD ветки test узнаём без токена.
