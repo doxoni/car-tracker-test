@@ -63,6 +63,19 @@ class Config:
     # Telegram
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 
+    # Режим бота: "polling" (опрос через getUpdates) или "webhook"
+    # (Telegram сам шлёт обновления POST'ом на наш адрес).
+    # На Render нужен webhook: спящий контейнер поднимает именно входящий
+    # запрос от Telegram, поэтому сообщение в боте "будит" сервис.
+    TELEGRAM_MODE = os.getenv("TELEGRAM_MODE", "polling").strip().lower()
+
+    # Секрет для проверки заголовка X-Telegram-Bot-Api-Secret-Token.
+    # В коде и Git его быть не должно - только в переменных окружения.
+    TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
+    # Адрес вебхука. Если пусто - берётся APP_URL + "/telegram/webhook".
+    TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+
     # Wialon
     WIALON_TOKEN = os.getenv("WIALON_TOKEN", "")
 

@@ -143,6 +143,68 @@ def bot_enabled() -> bool:
     return bool((Config.TELEGRAM_TOKEN or "").strip())
 
 
+# ---------- Режим webhook ----------
+
+
+def webhook_mode() -> bool:
+    """Работает ли бот в режиме webhook (по умолчанию - polling).
+
+    В webhook-режиме обновления приходят POST-запросом в Flask, а бот
+    только разбирает очередь. Спящий контейнер Render поднимает именно
+    входящий запрос, поэтому сервис спит, пока к нему никто не обратился.
+    """
+    from app.config import Config
+
+    return (Config.TELEGRAM_MODE or "polling").strip().lower() == "webhook"
+
+
+def bot_ready() -> bool:
+    """Бот запущен и готов принимать обновления."""
+    app = _bot_app
+    loop = _bot_loop
+    if app is None or loop is None:
+        return False
+    if not loop.is_running():
+        return False
+    return BOT_STATE.get("status") == "running"
+
+
+def bot_app_instance():
+    """Приложение python-telegram-bot (нужно для разбора обновления)."""
+    return _bot_app
+
+
+def enqueue_update(update) -> bool:
+    """Положить обновление Telegram в очередь бота.
+
+    Очередь живёт в event loop бота, а вызываем мы из потока Flask -
+    поэтому отправляем через run_coroutine_threadsafe.
+    """
+    import asyncio
+
+    app = _bot_app
+    loop = _bot_loop
+    if app is None or loop is None or not loop.is_running():
+        return False
+    try:
+        asyncio.run_coroutine_threadsafe(app.update_queue.put(update), loop)
+        return True
+    except Exception as exc:
+        print(f"⚠️ Не удалось принять обновление от Telegram: {exc}", flush=True)
+        return False
+
+
+def defer_update(update) -> None:
+    """Заглушка: в webhook-режиме ночные сообщения не откладываются.
+
+    Отложенные обновления жили бы в памяти процесса, а спящий контейнер
+    её теряет - сообщение пропало бы совсем. Поэтому в webhook-режиме
+    бот отвечает ночью сразу, а "сон" обеспечивает сам Render: нет
+    входящих запросов - контейнер засыпает.
+    """
+    return None
+
+
 # ---------- Ночная пауза ----------
 
 
@@ -165,8 +227,15 @@ def _stop_bot_for_night() -> None:
 
     Опрос останавливаем из event loop самого бота: stop_running() завершает
     run_forever, после чего run_polling корректно гасит апдейты.
+
+    В режиме webhook бота не останавливаем: контейнер и так засыпает
+    сам (пока нет входящих запросов), а остановка мешала бы принять
+    обновление, если сервис проснётся ночью.
     """
     global _started
+
+    if webhook_mode():
+        return
 
     app = _bot_app
     loop = _bot_loop
@@ -276,7 +345,9 @@ def ensure_bot_started(source: str = "request"):
 
     from app.night_mode import is_night
 
-    if is_night():
+    # В webhook-режиме ночная пауза не мешает: контейнер и так засыпает
+    # без входящих запросов, а проснуться должен быть готовым.
+    if is_night() and not webhook_mode():
         BOT_STATE["status"] = "night_mode"
         BOT_STATE["stage"] = f"ночная пауза до {_night_end_text()} по Киеву"
         BOT_STATE["updated_at"] = _now_text()
@@ -333,6 +404,50 @@ def reset_after_fork():
     )
 
 
+def webhook_url() -> str:
+    """Адрес, на который Telegram шлёт обновления."""
+    from app.config import Config
+
+    url = (Config.TELEGRAM_WEBHOOK_URL or "").strip()
+    if url:
+        return url
+    base = (Config.APP_URL or "").strip().rstrip("/")
+    return f"{base}/telegram/webhook"
+
+
+def _run_webhook(bot_app, loop) -> None:
+    """Запустить бота в режиме webhook и держать его живым.
+
+    Схема:
+      1. initialize() - проверка токена (getMe). Вебхук при этом
+         не удаляется: его удаляет только запуск опроса (run_polling).
+      2. set_webhook() - Telegram начинает слать обновления POST'ом
+         на наш адрес.
+      3. start() - бот начинает разбирать очередь обновлений.
+    Дальше event loop живёт, пока жив контейнер.
+    """
+    import asyncio
+
+    from app.config import Config
+
+    async def _main():
+        await bot_app.initialize()
+        # post_init при initialize() не вызывается - зовём сами.
+        if bot_app.post_init is not None:
+            await bot_app.post_init(bot_app)
+        await bot_app.bot.set_webhook(
+            webhook_url(),
+            secret_token=(Config.TELEGRAM_WEBHOOK_SECRET or "").strip() or None,
+        )
+        await bot_app.start()
+        # Ждём, пока контейнер не остановят.
+        while True:
+            await asyncio.sleep(3600)
+
+    _stage("запуск в режиме webhook")
+    loop.run_until_complete(_main())
+
+
 def start_bot_thread(source: str = "import") -> threading.Thread | None:
     """Поднять бота в фоновом потоке. Возвращает поток или None.
 
@@ -377,7 +492,7 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
             from bot.bot import build_app as build_bot
 
             async def _on_ready(application):
-                """Бот подключился к Telegram: getMe прошёл, опрос идёт.
+                """Бот подключился к Telegram: getMe прошёл, обновления идут.
 
                 Колбэк обязан быть корутиной: python-telegram-bot ждёт
                 awaitable из post_init/post_stop, и обычная функция
@@ -385,12 +500,12 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
                 awaitable is required".
                 """
                 BOT_STATE["status"] = "running"
-                _stage("опрос Telegram идёт")
+                _stage("бот готов принимать обновления")
 
             async def _on_stop(application):
-                """Опрос остановлен."""
+                """Бот остановлен."""
                 BOT_STATE["status"] = "stopped"
-                _stage("опрос остановлен")
+                _stage("бот остановлен")
 
             _stage("сборка приложения бота")
             bot_app = build_bot(on_ready=_on_ready, on_stop=_on_stop)
@@ -400,13 +515,18 @@ def start_bot_thread(source: str = "import") -> threading.Thread | None:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             # Сохраняем приложение и цикл: сторож ночного окна должен
-            # суметь остановить опрос снаружи потока бота.
+            # суметь остановить опрос снаружи потока бота, а вебхук -
+            # положить обновление в очередь бота.
             _bot_app = bot_app
             _bot_loop = loop
-            _stage("запуск long polling")
-            # stop_signals=None: ставить обработчики сигналов можно только
-            # в главном потоке, а бот работает в отдельном.
-            bot_app.run_polling(stop_signals=None)
+
+            if webhook_mode():
+                _run_webhook(bot_app, loop)
+            else:
+                _stage("запуск long polling")
+                # stop_signals=None: ставить обработчики сигналов можно только
+                # в главном потоке, а бот работает в отдельном.
+                bot_app.run_polling(stop_signals=None)
             BOT_STATE["status"] = "stopped"
         except BaseException as exc:
             # BaseException, а не Exception: SystemExit и прочие наследники

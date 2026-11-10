@@ -665,7 +665,22 @@ def build_app(on_ready=None, on_stop=None):
 
 
 def main():
-    """Запуск бота в режиме long polling."""
+    """Запуск бота в режиме long polling.
+
+    В режиме webhook (TELEGRAM_MODE=webhook) этот скрипт запускать
+    нельзя: python-telegram-bot при старте опроса удаляет вебхук,
+    и обновления на сервере перестанут приходить.
+    """
+    from app.config import Config
+
+    if (Config.TELEGRAM_MODE or "polling").strip().lower() == "webhook":
+        print(
+            "🤖 Бот работает в режиме webhook - вебхук настроен на сервере.\n"
+            "   Локальный запуск опроса удалит вебхук и сломает работу бота.\n"
+            "   Запускай без TELEGRAM_MODE=webhook (или сбрось переменную)."
+        )
+        return
+
     application = build_app()
     print("🤖 Бот запущен (long polling)...")
     # Python 3.14+: гарантируем наличие event loop в текущем потоке

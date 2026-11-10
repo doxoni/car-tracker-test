@@ -115,11 +115,14 @@ def create_app():
     # Регистрация blueprints (маршрутов)
     from .routes import bp as routes_bp, web_bp
     from .legacy_routes import bp as legacy_bp
+    from .webhook import bp as webhook_bp
 
     app.register_blueprint(routes_bp)
     app.register_blueprint(web_bp)
     # API старой системы — для старого интерфейса Mini App.
     app.register_blueprint(legacy_bp)
+    # Вебхук Telegram: будит спящий контейнер и передаёт обновление боту.
+    app.register_blueprint(webhook_bp)
 
     _register_fork_hook(app)
 
