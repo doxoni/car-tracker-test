@@ -480,3 +480,147 @@ def test_added_car_goes_to_my_list(client, app):
         assert UserVehicle.query.filter_by(vehicle_id=data["id"]).count() == 1
 
 
+# ---------- проверка заправок и обслуживания ----------
+
+
+def test_level_one_fuel_goes_to_review(client, app):
+    """Заправка водителя уходит на проверку, а не сразу в сумму."""
+    from app import db
+    from app.models import FuelEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    response = client.post(
+        "/api/cars/%d/fuel" % vehicle_id,
+        json={"liters": 100, "price": 40, "odometer": 100000},
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["status"] == "pending"
+    with app.app_context():
+        entry = FuelEntry.query.first()
+        assert entry.status == "pending"
+        assert entry.submitted_by is not None
+        assert entry.approved_by is None
+
+
+def test_level_two_fuel_is_approved_at_once(client, app):
+    """Оператор записывает заправку сразу подтверждённой."""
+    from app import db
+    from app.models import FuelEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(2)
+
+    response = client.post(
+        "/api/cars/%d/fuel" % vehicle_id,
+        json={"liters": 100, "price": 40, "odometer": 100000},
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["status"] == "approved"
+    with app.app_context():
+        entry = FuelEntry.query.first()
+        assert entry.status == "approved"
+        assert entry.approved_by is not None
+
+
+def test_level_one_service_goes_to_review(client, app):
+    """Обслуживание от водителя тоже ждёт проверки."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    response = client.post(
+        "/api/cars/%d/services" % vehicle_id,
+        json={"description": "замена масла", "amount": 5000},
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["status"] == "pending"
+    with app.app_context():
+        service = ServiceEntry.query.first()
+        assert service.status == "pending"
+
+
+def test_pending_fuel_is_visible_but_not_in_totals(client, app):
+    """Запись на проверке видна в истории, но в счётчики не идёт."""
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    client.post(
+        "/api/cars/%d/fuel" % vehicle_id,
+        json={"liters": 100, "price": 40, "odometer": 100000},
+    )
+
+    history = client.get("/api/cars/%d/fuel" % vehicle_id).get_json()
+    assert history["fuel"][0]["status"] == "pending"
+
+    car = client.get("/api/cars/%d" % vehicle_id).get_json()["car"]
+    assert car["fuel_count"] == 0
+    assert car["total_fuel_amount"] == 0
+
+
+def test_level_one_cannot_delete_approved_service(client, app):
+    """Подтверждённую запись водитель удалить не может."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(2)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1000,
+            description="ремонт",
+            status="approved",
+            submitted_by=user.id,
+            approved_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+        _make_user(1)
+
+    response = client.delete("/api/cars/%d/services/%d" % (vehicle_id, service_id))
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
+def test_level_one_can_delete_own_pending_service(client, app):
+    """Свою запись, пока она на проверке, водитель удалить может."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1000,
+            description="ремонт",
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+
+    response = client.delete("/api/cars/%d/services/%d" % (vehicle_id, service_id))
+
+    assert response.status_code == 200
+    with app.app_context():
+        assert ServiceEntry.query.count() == 0
+
+

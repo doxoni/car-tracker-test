@@ -316,6 +316,56 @@ def _service_rows(vehicle_id: int) -> list:
     )
 
 
+def _approved_rows(rows: list) -> list:
+    """Только подтверждённые записи.
+
+    Записи на проверке и отклонённые в суммы и счётчики не идут: пока
+    третий уровень их не подтвердил, денег в отчёте не будет.
+    """
+    return [row for row in rows if (row.status or "approved") == "approved"]
+
+
+def _review_fields(level: int) -> dict:
+    """Поля одобрения для новой записи.
+
+    Водитель (1 уровень) присылает запись на проверку третьему уровню,
+    оператор и суперадмин записывают сразу подтверждёнными.
+    """
+    user_id = _current_user_id() or None
+    if level < 2:
+        return {
+            "status": "pending",
+            "submitted_by": user_id,
+            "approved_by": None,
+            "approved_at": None,
+        }
+    return {
+        "status": "approved",
+        "submitted_by": user_id,
+        "approved_by": user_id,
+        "approved_at": datetime.utcnow(),
+    }
+
+
+def _notify_review(kind: str, entry) -> None:
+    """Уведомить третий уровень о новой записи на проверке.
+
+    Ошибка отправки не должна мешать самой записи: она уже в базе.
+    """
+    try:
+        from app.models import User
+
+        # Если проверяющих нет, уведомлять некому.
+        has_admin = User.query.filter_by(level=3, is_whitelisted=True).first()
+        if has_admin is None:
+            return
+        from app.notifications import notify_pending_entry
+
+        notify_pending_entry(kind, entry)
+    except Exception as error:
+        print(f"⚠️ Не удалось отправить уведомление о проверке: {error}")
+
+
 def _expense_rows(vehicle_id: int) -> list:
     """Расходы фуры."""
     return (
@@ -335,7 +385,7 @@ def _total_expenses(vehicle_id: int) -> float:
 
 def _fuel_stats(vehicle_id: int) -> dict:
     """Сводка по заправкам: литры, деньги, пробег, средний расход."""
-    rows = list(reversed(_fuel_rows(vehicle_id)))
+    rows = list(reversed(_approved_rows(_fuel_rows(vehicle_id))))
     stats = {
         "count": len(rows),
         "total_liters": 0.0,
@@ -369,8 +419,8 @@ def _fuel_stats(vehicle_id: int) -> dict:
 def _car_summary(vehicle: Vehicle) -> dict:
     """Краткая сводка по фуре: что показываем в списке и в шапке."""
     item = _vehicle_dict(vehicle)
-    fuels = _fuel_rows(vehicle.id)
-    services = _service_rows(vehicle.id)
+    fuels = _approved_rows(_fuel_rows(vehicle.id))
+    services = _approved_rows(_service_rows(vehicle.id))
     item["total_expenses"] = _total_expenses(vehicle.id)
     item["fuel_count"] = len(fuels)
     item["service_count"] = len(services)
@@ -759,6 +809,7 @@ def api_fuel_list(vehicle_id: int):
                 "is_full": 1 if row.is_full else 0,
                 "location": row.location or "",
                 "created_at": _iso(row.created_at),
+                "status": row.status or "approved",
             }
         )
     # Заправки из бочки приходят по номеру машины: бочка общая,
@@ -776,6 +827,7 @@ def api_fuel_list(vehicle_id: int):
                 "is_full": 0,
                 "location": "",
                 "created_at": row["created_at"],
+                "status": "approved",
             }
         )
     fuel.sort(key=lambda item: item["created_at"], reverse=True)
@@ -803,6 +855,7 @@ def api_add_fuel(vehicle_id: int):
 
     is_full = data.get("is_full", True)
     is_full = 1 if (is_full in (1, "1", True, "true", "yes")) else 0
+    level = _level()
     entry = FuelEntry(
         vehicle_id=vehicle.id,
         liters=liters,
@@ -812,14 +865,21 @@ def api_add_fuel(vehicle_id: int):
         is_full=bool(is_full),
         location="",
         created_at=datetime.utcnow(),
+        **_review_fields(level),
     )
     db.session.add(entry)
     db.session.commit()
+    if entry.status == "pending":
+        _notify_review("fuel", entry)
+        message = "Заправка отправлена на проверку"
+    else:
+        message = "Заправка записана"
     return jsonify(
         {
             "ok": True,
-            "message": "Заправка записана",
+            "message": message,
             "id": entry.id,
+            "status": entry.status,
             "total": _total_expenses(vehicle.id),
             "odometer": int(vehicle.current_mileage or 0),
             "amount": round(liters * price, 2),
@@ -847,6 +907,7 @@ def api_services(vehicle_id: int):
                 "next_km": row.next_km,
                 "next_date": _json_date(row.next_date),
                 "created_at": _iso(row.created_at),
+                "status": row.status or "approved",
             }
         )
     return jsonify({"ok": True, "services": services})
@@ -903,14 +964,21 @@ def api_add_service(vehicle_id: int):
         next_km=next_km,
         next_date=datetime.strptime(next_date, "%Y-%m-%d") if next_date else None,
         created_at=datetime.utcnow(),
+        **_review_fields(_level()),
     )
     db.session.add(service)
     db.session.commit()
+    if service.status == "pending":
+        _notify_review("service", service)
+        message = "Обслуживание отправлено на проверку"
+    else:
+        message = "Обслуживание записано"
     return jsonify(
         {
             "ok": True,
-            "message": "Обслуживание записано",
+            "message": message,
             "id": service.id,
+            "status": service.status,
             "total": _total_expenses(vehicle.id),
             "odometer": int(vehicle.current_mileage or 0),
             "next_km": next_km,
@@ -930,6 +998,14 @@ def api_delete_service(vehicle_id: int, service_id: int):
     service = db.session.get(ServiceEntry, service_id)
     if service is None or service.vehicle_id != vehicle.id:
         return _fail("запись не найдена", 404)
+
+    # Водитель может убрать только свою запись, пока она на проверке.
+    # Подтверждённые записи трогает уже оператор или админ.
+    if _level() < 2:
+        if (service.status or "approved") != "pending":
+            return _fail("подтверждённую запись удалить нельзя", 403)
+        if service.submitted_by != _current_user_id():
+            return _fail("нельзя удалить чужую запись", 403)
 
     db.session.delete(service)
     db.session.commit()
@@ -1256,10 +1332,10 @@ def api_month_costs():
         for expense in _expense_rows(vehicle.id):
             if _in_month(expense.date):
                 car_totals["expenses"] += float(expense.amount or 0)
-        for entry in _fuel_rows(vehicle.id):
+        for entry in _approved_rows(_fuel_rows(vehicle.id)):
             if _in_month(entry.created_at):
                 car_totals["fuel"] += float(entry.amount or 0)
-        for service in _service_rows(vehicle.id):
+        for service in _approved_rows(_service_rows(vehicle.id)):
             if _in_month(service.created_at):
                 car_totals["services"] += float(service.amount or 0)
         for key in ("expenses", "fuel", "services"):
@@ -1298,8 +1374,8 @@ def api_month_costs():
 def _car_report_summary(vehicle: Vehicle) -> dict:
     """Сводка по одной фуре для общего отчёта."""
     expenses = _expense_rows(vehicle.id)
-    fuels = _fuel_rows(vehicle.id)
-    services = _service_rows(vehicle.id)
+    fuels = _approved_rows(_fuel_rows(vehicle.id))
+    services = _approved_rows(_service_rows(vehicle.id))
     return {
         "id": vehicle.id,
         "model": vehicle.brand or "",
@@ -1386,6 +1462,15 @@ def api_report_summary():
     return jsonify({"ok": True, "report": result})
 
 
+def _status_note(status: str, lang: str) -> str:
+    """Пометка статуса записи: на проверке, отклонено или подтверждено."""
+    if status == "pending":
+        return " — " + t("на проверке", lang)
+    if status == "rejected":
+        return " — " + t("отклонено", lang)
+    return ""
+
+
 def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
     """Строки истории по одной фуре (для выгрузки текстом)."""
     lang = current_lang()
@@ -1400,6 +1485,7 @@ def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
             f"  {_iso(entry.created_at)} | {float(entry.liters or 0):.1f} л | "
             f"{float(entry.price or 0):.2f} | {float(entry.amount or 0):.2f} | "
             f"{entry.odometer if entry.odometer is not None else '-'}"
+            f"{_status_note(entry.status or 'approved', lang)}"
         )
     lines.append("")
     lines.append(t("Обслуживание:", lang))
@@ -1408,6 +1494,7 @@ def _history_lines_for_vehicle(vehicle: Vehicle) -> list:
             f"  {_iso(service.created_at)} | {service.description or ''} | "
             f"{float(service.amount or 0):.2f} | "
             f"{service.odometer if service.odometer is not None else '-'}"
+            f"{_status_note(service.status or 'approved', lang)}"
         )
     lines.append("")
     lines.append(t("Расходы:", lang))

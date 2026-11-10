@@ -6,6 +6,7 @@
   /language — выбрать язык интерфейса (русский или украинский)
   /barrels — показать остатки топлива в бочках
   /today — расходы за сегодня
+  /cheak (или /check) — заправки и обслуживания на проверке: принять или отклонить
 
 Выдача уровней доступа (названия команд нестандартные - это и есть защита,
 кто не знает команду, тот и не выдаст себе права):
@@ -46,7 +47,7 @@ from app import create_app, db
 from app.config import Config
 from app.db_retry import run_with_retry
 from app.i18n import DEFAULT_LANG, LANG_NAMES, normalize_lang, t
-from app.models import User, Vehicle, Expense, FuelBarrel
+from app.models import User, Vehicle, Expense, FuelBarrel, FuelEntry, ServiceEntry
 
 load_dotenv()
 
@@ -117,6 +118,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Нажмите кнопку ниже, чтобы открыть Mini App:",
         "",
         "🌐 Смена языка — команда /language",
+        "🔎 Проверка заявок — команда /cheak",
     ]
     text = "\n".join(t(line, current) for line in lines)
     await update.message.reply_text(text, reply_markup=reply_markup)
@@ -201,6 +203,178 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines.append(f"\n{t('Итого: ', current)}{total:,.0f} ₴")
     await update.message.reply_text("\n".join(lines))
+
+
+# ---------- Проверка заявок ----------
+
+# Кто прислал запись: показываем имя, а если его нет - Telegram ID.
+def _submitter_name(user) -> str:
+    """Как показать отправителя записи."""
+    if user is None:
+        return "-"
+    if user.username:
+        return f"@{user.username}"
+    return f"tg_id {user.tg_id}"
+
+
+def _entry_data(kind: str, entry) -> dict:
+    """Данные записи для показа в боте (без лишних запросов)."""
+    vehicle = db.session.get(Vehicle, entry.vehicle_id)
+    submitter = (
+        db.session.get(User, entry.submitted_by) if entry.submitted_by else None
+    )
+    created = entry.created_at
+    return {
+        "brand": vehicle.brand if vehicle else "",
+        "plate": vehicle.plate if vehicle else "",
+        "amount": float(entry.amount or 0),
+        "liters": float(getattr(entry, "liters", 0) or 0),
+        "description": getattr(entry, "description", "") or "",
+        "created_at": created.strftime("%d.%m.%Y %H:%M") if created else "-",
+        "who": _submitter_name(submitter),
+    }
+
+
+def _pending_entries() -> list:
+    """Заправки и обслуживания, ждущие проверки (свежие сверху)."""
+    application = app_context()
+    with application.app_context():
+        fuels = run_with_retry(
+            lambda: FuelEntry.query.filter_by(status="pending")
+            .order_by(FuelEntry.created_at.desc(), FuelEntry.id.desc())
+            .all()
+        )
+        services = run_with_retry(
+            lambda: ServiceEntry.query.filter_by(status="pending")
+            .order_by(ServiceEntry.created_at.desc(), ServiceEntry.id.desc())
+            .all()
+        )
+        items = []
+        for entry in fuels:
+            items.append(("fuel", entry.id, _entry_data("fuel", entry)))
+        for entry in services:
+            items.append(("service", entry.id, _entry_data("service", entry)))
+    return items
+
+
+def _entry_text(kind: str, data: dict, lang: str) -> str:
+    """Текст записи на проверке."""
+    if kind == "fuel":
+        lines = [
+            f"⛽ {t('Заправка на проверке', lang)}",
+            f"{t('Фура:', lang)} {data['brand']} ({data['plate']})",
+            f"{t('Литры:', lang)} {data['liters']:,.1f}",
+            f"{t('Сумма:', lang)} ₴ {data['amount']:,.0f}",
+        ]
+    else:
+        lines = [
+            f"🔧 {t('Обслуживание на проверке', lang)}",
+            f"{t('Фура:', lang)} {data['brand']} ({data['plate']})",
+            f"{t('Что сделали:', lang)} {data['description'] or '-'}",
+            f"{t('Сумма:', lang)} ₴ {data['amount']:,.0f}",
+        ]
+    lines.append(f"{t('Когда:', lang)} {data['created_at']}")
+    lines.append(f"{t('Отправитель:', lang)} {data['who']}")
+    return "\n".join(lines)
+
+
+async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /cheak — список заправок и обслуживаний на проверке.
+
+    У каждой записи кнопки «Принять» и «Отклонить». Доступно с 3 уровня.
+    """
+    tg_id = update.effective_user.id
+    lang = normalize_lang(_user_lang(tg_id))
+    if _user_level(tg_id) < 3 and not _is_owner(tg_id):
+        await update.message.reply_text(
+            t(
+                "⛔ Список проверки доступен только с 3 уровнем. Наберите /fraeadmin3 - и он откроется.",
+                lang,
+            )
+        )
+        return
+
+    items = _pending_entries()
+    if not items:
+        await update.message.reply_text(t("✅ На проверке пусто - всё подтверждено.", lang))
+        return
+
+    for kind, entry_id, data in items:
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    t("✅ Принять", lang),
+                    callback_data=f"review:ok:{kind}:{entry_id}",
+                ),
+                InlineKeyboardButton(
+                    t("❌ Отклонить", lang),
+                    callback_data=f"review:no:{kind}:{entry_id}",
+                ),
+            ]
+        ]
+        await update.message.reply_text(
+            _entry_text(kind, data, lang),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+
+def _apply_review(kind: str, entry_id: int, approved: bool, tg_id: int):
+    """Принять или отклонить запись на проверке."""
+    application = app_context()
+    with application.app_context():
+        model = FuelEntry if kind == "fuel" else ServiceEntry
+        entry = db.session.get(model, entry_id)
+        if entry is None or (entry.status or "approved") != "pending":
+            return None
+        entry.status = "approved" if approved else "rejected"
+        user = db.session.get(User, tg_id)
+        entry.approved_by = user.id if user else None
+        entry.approved_at = datetime.utcnow()
+        db.session.commit()
+        data = _entry_data(kind, entry)
+        try:
+            from app.notifications import notify_review_result
+
+            notify_review_result(kind, entry, approved)
+        except Exception as error:
+            print(f"⚠️ Не удалось отправить уведомление о решении: {error}")
+    return data
+
+
+async def review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопки «Принять» и «Отклонить» под записью на проверке."""
+    query = update.callback_query
+    data = str(query.data or "")
+    if not data.startswith("review:"):
+        return
+    tg_id = query.from_user.id
+    lang = normalize_lang(_user_lang(tg_id))
+    if _user_level(tg_id) < 3 and not _is_owner(tg_id):
+        await query.answer(t("⛔ Это доступно только с 3 уровнем.", lang), show_alert=True)
+        return
+
+    parts = data.split(":")
+    if len(parts) != 4:
+        return
+    action, kind, raw_id = parts[1], parts[2], parts[3]
+    try:
+        entry_id = int(raw_id)
+    except ValueError:
+        return
+
+    result = _apply_review(kind, entry_id, action == "ok", tg_id)
+    if result is None:
+        await query.edit_message_text(t("Запись не найдена или уже разобрана.", lang))
+        return
+
+    if action == "ok":
+        title = t("✅ Запись принята", lang)
+    else:
+        title = t("❌ Запись отклонена", lang)
+    await query.edit_message_text(
+        f"{title}\n\n{_entry_text(kind, result, lang)}",
+        reply_markup=None,
+    )
 
 
 # ---------- Уровни доступа ----------
@@ -480,6 +654,9 @@ def build_app(on_ready=None, on_stop=None):
     application.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang:"))
     application.add_handler(CommandHandler("barrels", barrels_cmd))
     application.add_handler(CommandHandler("today", today_cmd))
+    application.add_handler(CommandHandler("cheak", check_cmd))
+    application.add_handler(CommandHandler("check", check_cmd))
+    application.add_handler(CallbackQueryHandler(review_callback, pattern=r"^review:"))
     application.add_handler(CommandHandler("yuser_1", yuser1_cmd))
     application.add_handler(CommandHandler("admunus2", admin2_cmd))
     application.add_handler(CommandHandler("fraeadmin3", admin3_cmd))

@@ -72,9 +72,59 @@ def ensure_schema(app) -> None:
 
     if _has_table(engine, "users"):
         db.create_all()
+        _add_missing_columns()
         return
 
     _upgrade_or_fallback(app)
+
+
+def _default_sql(default) -> str:
+    """Значение по умолчанию для ALTER TABLE ADD COLUMN."""
+    if isinstance(default, bool):
+        return "1" if default else "0"
+    if isinstance(default, (int, float)):
+        return str(default)
+    text_value = str(default)
+    if text_value.startswith("'") and text_value.endswith("'"):
+        return text_value
+    return f"'{text_value}'"
+
+
+def _add_missing_columns() -> None:
+    """Дописать колонки, которых нет в таблицах.
+
+    Нужно для баз, созданных через db.create_all(): у них нет истории
+    alembic, поэтому миграции к ним не применяются, а новых колонок
+    (например, статуса проверки) в таблицах не появляется.
+    """
+    from sqlalchemy import text
+
+    from app import db
+
+    inspector = inspect(db.engine)
+    tables = set(inspector.get_table_names())
+    dialect = db.engine.dialect
+
+    for table in db.metadata.sorted_tables:
+        if table.name not in tables:
+            continue
+        existing = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            ddl = column.type.compile(dialect=dialect)
+            default = column.server_default
+            if default is None:
+                default = column.default
+            if not column.nullable:
+                # NOT NULL без значения по умолчанию добавить нельзя.
+                if default is None:
+                    continue
+                ddl += " DEFAULT " + _default_sql(default.arg if hasattr(default, "arg") else default)
+            db.session.execute(
+                text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {ddl}')
+            )
+    db.session.commit()
 
 
 def _upgrade_or_fallback(app) -> None:
@@ -86,3 +136,4 @@ def _upgrade_or_fallback(app) -> None:
     except Exception as exc:
         print(f"⚠️ Миграции не применились ({exc}). Создаю таблицы по моделям.")
         db.create_all()
+        _add_missing_columns()

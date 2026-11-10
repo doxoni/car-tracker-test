@@ -8,7 +8,7 @@
 """
 
 from datetime import date, timedelta
-from app import create_app
+from app import create_app, db
 from app.i18n import normalize_lang, t
 from app.models import FuelBarrel, Expense, Vehicle, User
 from app.config import Config
@@ -147,6 +147,94 @@ def notify_pending_expense(expense: Expense):
             f"👉 {t('Одобрите или отклоните в Mini App.', lang)}"
         )
         asyncio.run(send_telegram_message(admin.tg_id, msg))
+
+
+def _submitter_name(user) -> str:
+    """Как показать отправителя записи."""
+    if user is None:
+        return "-"
+    if user.username:
+        return f"@{user.username}"
+    return f"tg_id {user.tg_id}"
+
+
+def notify_pending_entry(kind: str, entry) -> None:
+    """Уведомить уровни 3 о новой заправке или обслуживании на проверке.
+
+    kind - "fuel" или "service".
+    """
+    application = create_app()
+    with application.app_context():
+        admins = User.query.filter_by(level=3, is_whitelisted=True).all()
+        vehicle = db.session.get(Vehicle, entry.vehicle_id)
+        submitter = (
+            db.session.get(User, entry.submitted_by) if entry.submitted_by else None
+        )
+        brand = vehicle.brand if vehicle else ""
+        plate = vehicle.plate if vehicle else ""
+        amount = float(entry.amount or 0)
+        liters = float(getattr(entry, "liters", 0) or 0)
+        description = getattr(entry, "description", "") or ""
+        who = _submitter_name(submitter)
+
+    if not admins:
+        return
+
+    for admin in admins:
+        lang = normalize_lang(admin.lang)
+        if kind == "fuel":
+            lines = [
+                f"🔔 {t('Новая заправка на проверке!', lang)}",
+                f"{t('Фура:', lang)} {brand} ({plate})",
+                f"{t('Литры:', lang)} {liters:,.1f}",
+                f"{t('Сумма:', lang)} ₴ {amount:,.0f}",
+            ]
+        else:
+            lines = [
+                f"🔔 {t('Новое обслуживание на проверке!', lang)}",
+                f"{t('Фура:', lang)} {brand} ({plate})",
+                f"{t('Что сделали:', lang)} {description or '-'}",
+                f"{t('Сумма:', lang)} ₴ {amount:,.0f}",
+            ]
+        lines.append(f"{t('Отправитель:', lang)} {who}")
+        lines.append(f"👉 {t('Проверьте по команде /cheak', lang)}")
+        asyncio.run(send_telegram_message(admin.tg_id, "\n".join(lines)))
+
+
+def notify_review_result(kind: str, entry, approved: bool) -> None:
+    """Сообщить отправителю, приняли его запись или отклонили."""
+    application = create_app()
+    with application.app_context():
+        submitter = (
+            db.session.get(User, entry.submitted_by) if entry.submitted_by else None
+        )
+        vehicle = db.session.get(Vehicle, entry.vehicle_id)
+        brand = vehicle.brand if vehicle else ""
+        plate = vehicle.plate if vehicle else ""
+        amount = float(entry.amount or 0)
+
+    if submitter is None:
+        return
+
+    lang = normalize_lang(submitter.lang)
+    if kind == "fuel":
+        title = (
+            t("✅ Ваша заправка принята", lang)
+            if approved
+            else t("❌ Ваша заправка отклонена", lang)
+        )
+    else:
+        title = (
+            t("✅ Ваше обслуживание принято", lang)
+            if approved
+            else t("❌ Ваше обслуживание отклонено", lang)
+        )
+    msg = (
+        f"{title}\n"
+        f"{t('Фура:', lang)} {brand} ({plate})\n"
+        f"{t('Сумма:', lang)} ₴ {amount:,.0f}"
+    )
+    asyncio.run(send_telegram_message(submitter.tg_id, msg))
 
 
 if __name__ == "__main__":

@@ -35,6 +35,10 @@ class User(db.Model):
     fuel_outflows = db.relationship("FuelOutflow", backref="driver", lazy=True)
     submitted_expenses = db.relationship("Expense", backref="submitter", lazy=True, foreign_keys="Expense.submitted_by")
     approved_expenses = db.relationship("Expense", backref="approver", lazy=True, foreign_keys="Expense.approved_by")
+    submitted_fuels = db.relationship("FuelEntry", backref="fuel_submitter", lazy=True, foreign_keys="FuelEntry.submitted_by")
+    approved_fuels = db.relationship("FuelEntry", backref="fuel_approver", lazy=True, foreign_keys="FuelEntry.approved_by")
+    submitted_services = db.relationship("ServiceEntry", backref="service_submitter", lazy=True, foreign_keys="ServiceEntry.submitted_by")
+    approved_services = db.relationship("ServiceEntry", backref="service_approver", lazy=True, foreign_keys="ServiceEntry.approved_by")
 
     def is_level_1(self):
         return self.level == 1
@@ -326,11 +330,16 @@ class FuelEntry(db.Model):
     is_full = db.Column(db.Boolean, default=True)
     location = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Проверка третьим уровнем: водитель присылает запись на проверку.
+    status = db.Column(db.String(20), default="approved")  # pending | approved | rejected
+    submitted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
 
     vehicle = db.relationship("Vehicle", backref="fuel_entries", lazy=True)
 
     def __repr__(self):
-        return f"<FuelEntry {self.liters}л>"
+        return f"<FuelEntry {self.liters}л status={self.status}>"
 
 
 class ServiceEntry(db.Model):
@@ -347,11 +356,16 @@ class ServiceEntry(db.Model):
     next_km = db.Column(db.Integer, nullable=True)
     next_date = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Проверка третьим уровнем: водитель присылает запись на проверку.
+    status = db.Column(db.String(20), default="approved")  # pending | approved | rejected
+    submitted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
 
     vehicle = db.relationship("Vehicle", backref="service_entries", lazy=True)
 
     def __repr__(self):
-        return f"<ServiceEntry {self.amount}>"
+        return f"<ServiceEntry {self.amount} status={self.status}>"
 
 
 class Report(db.Model):

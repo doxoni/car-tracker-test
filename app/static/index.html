@@ -293,6 +293,12 @@
   .item-title { font-weight: 500; font-size: 15px; }
   .item-sum { white-space: nowrap; font-weight: 600; }
   .item-sub { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
+  .item-badge {
+    display: inline-block; margin-top: 4px; padding: 2px 8px;
+    border-radius: 999px; background: var(--chip);
+    color: var(--chip_text); font-size: 11.5px;
+  }
+  .item-badge.bad { background: var(--danger_soft); color: var(--danger); }
   .report-item { border-bottom: 1px solid var(--line); padding: 12px 0; }
   .report-item:last-child { border-bottom: 0; }
   .report-item-top { display: flex; align-items: center; gap: 10px; }
@@ -726,7 +732,7 @@
   <button class="menu-btn" onclick="showMileageForm()">
     <span class="ico">📏</span><span class="txt">Пробег</span><span class="arr">›</span>
   </button>
-  <button class="menu-btn" id="car-fill-barrel" onclick="showBarrelFillForCar()">
+  <button class="menu-btn hidden" id="car-fill-barrel" onclick="showBarrelFillForCar()">
     <span class="ico">🛢</span><span class="txt">Заправить из бочки</span><span class="arr">›</span>
   </button>
   <button class="menu-btn" onclick="showPlateForm()">
@@ -1732,9 +1738,11 @@ function loadCars() {
           '<button type="button" class="btn-secondary car-action" ' +
             'onclick="event.stopPropagation(); downloadCarHistory(' + car.id + ')">' +
             '⬇️ Скачать историю</button>' +
-          '<button type="button" class="btn-secondary car-action" ' +
-            'onclick="event.stopPropagation(); showBarrelFillForCar(' + car.id + ')">' +
-            '⛽ Из бочки</button>' +
+          (userLevel >= 2
+            ? '<button type="button" class="btn-secondary car-action" ' +
+                'onclick="event.stopPropagation(); showBarrelFillForCar(' + car.id + ')">' +
+                '⛽ Из бочки</button>'
+            : "") +
         '</div>';
       card.onclick = function () { openCar(car.id); };
       box.appendChild(card);
@@ -1777,7 +1785,7 @@ function openCar(carId) {
     const downloadBtn = document.getElementById("car-download-history");
     if (downloadBtn && data.level >= 3) downloadBtn.classList.remove("hidden");
     const barrelBtn = document.getElementById("car-fill-barrel");
-    if (barrelBtn && data.level >= 2) barrelBtn.classList.remove("hidden");
+    if (barrelBtn) barrelBtn.classList.toggle("hidden", data.level < 2);
     // Кнопка «в мой список» — только водителю (уровень 1).
     const claimBtn = document.getElementById("car-claim");
     if (claimBtn) {
@@ -3638,7 +3646,11 @@ function loadHistory(path, key, render) {
       return;
     }
     let total = 0;
-    items.forEach(function (item) { total += Number(item.amount || 0); });
+    items.forEach(function (item) {
+      // На проверке и отклонённые записи в итог не идут.
+      if (item.status && item.status !== "approved") return;
+      total += Number(item.amount || 0);
+    });
     body.innerHTML =
       '<div class="hist-total">' +
         '<span class="hist-total-label">Итого</span>' +
@@ -3662,6 +3674,17 @@ function retryHistory() {
   if (historyRequest) loadHistory(historyRequest.path, historyRequest.key, historyRequest.render);
 }
 
+// Пометка записи: на проверке, отклонено или подтверждено.
+function statusBadge(item) {
+  if (item.status === "pending") {
+    return '<span class="item-badge">⏳ на проверке</span>';
+  }
+  if (item.status === "rejected") {
+    return '<span class="item-badge bad">❌ отклонено</span>';
+  }
+  return "";
+}
+
 function renderFuel(item) {
   if (item.source === "barrel") {
     // Заправка из бочки: цены нет, зато видно, откуда лили.
@@ -3675,7 +3698,8 @@ function renderFuel(item) {
     '<span class="item-title">' + num(item.liters) + ' л × ' + money(item.price) + '</span>' +
     '<span class="item-sum">' + money(item.amount) + '</span></div>' +
     '<div class="item-sub">' + num(item.odometer) + ' км · ' + dateTime(item.created_at) +
-    (item.is_full ? ' · полный бак' : ' · частично') + '</div>';
+    (item.is_full ? ' · полный бак' : ' · частично') + '</div>' +
+    statusBadge(item);
 }
 
 function renderServices(item) {
@@ -3683,12 +3707,17 @@ function renderServices(item) {
   if (item.odometer) sub = num(item.odometer) + " км · " + sub;
   if (item.next_km) sub += " · следующее через " + num(item.next_km) + " км";
   if (item.next_date) sub += " · следующее до " + item.next_date;
+  // Удалить может оператор (2 уровень) или водитель — свою запись на проверке.
+  const canDelete = userLevel >= 2 || item.status === "pending";
   let html = '<div class="item-top">' +
     '<span class="item-title">' + esc(item.description) + '</span>' +
     '<span class="item-sum">' + money(item.amount) + '</span>' +
-    '<button class="item-del" aria-label="Удалить запись" ' +
-    'onclick="askDeleteService(' + Number(item.id) + ')">✕</button></div>' +
-    '<div class="item-sub">' + sub + '</div>';
+    (canDelete
+      ? '<button class="item-del" aria-label="Удалить запись" ' +
+          'onclick="askDeleteService(' + Number(item.id) + ')">✕</button>'
+      : "") + '</div>' +
+    '<div class="item-sub">' + sub + '</div>' +
+    statusBadge(item);
   // Подробности добавляем отдельной строкой, если они есть.
   if (item.details) {
     html += '<div class="item-sub">' + esc(item.details) + '</div>';
