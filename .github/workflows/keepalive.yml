@@ -4,6 +4,13 @@
 # Бот в Telegram работает long polling - пока сервис спит, бот не отвечает.
 # GitHub Actions работает, даже когда ноутбук выключен.
 #
+# Ночью (02:00-05:00 по Киеву) пинги не делаем: сервис в это время
+# должен спать, а пинг его бы разбудил. Точное время паузы задаёт
+# workflow night-sleep.yml (suspend/resume через API Render).
+#
+# Днём пингуем с повторами: холодный старт после сна длится около минуты,
+# обычный curl с одним заходом такую задержку не пережил бы.
+#
 # Репозиторий публичный, поэтому минуты Actions не ограничены.
 name: keep-alive
 
@@ -15,8 +22,37 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Проверить живость сервиса
+      - name: Забрать скрипт
+        uses: actions/checkout@v4
+
+      - name: Проверить киевское время
+        id: clock
         run: |
-          curl -fsS --max-time 60 https://car-tracker-test.onrender.com/api/health
-          echo "Сервис жив."
+          echo "time=$(TZ=Europe/Kyiv date +%H%M)" >> "$GITHUB_OUTPUT"
+          echo "Киев: $(TZ=Europe/Kyiv date '+%Y-%m-%d %H:%M:%S')"
+
+      # С 01:45 до 05:00 по Киеву сервис должен спать - не будим его.
+      - name: Ночная пауза - не будим сервис
+        if: steps.clock.outputs.time >= '0145' && steps.clock.outputs.time < '0500'
+        run: |
+          echo "Ночное окно - пинг пропускаем."
+
+      - name: Проверить живость сервиса
+        if: steps.clock.outputs.time < '0145' || steps.clock.outputs.time >= '0500'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          set -u
+          URL="https://car-tracker-test.onrender.com/api/health"
+          # Повторы: после сна сервис поднимается около минуты.
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 \
+            --retry 3 --retry-delay 10 --retry-all-errors "$URL" || echo "000")
+          if [ "$CODE" = "200" ]; then
+            echo "Сервис жив."
+            exit 0
+          fi
+          echo "Сервис не отвечает (код $CODE) - поднимаем."
+          # Сервис мог остаться усыпленным после ночной паузы: будим его.
+          python3 night_sleep.py resume
