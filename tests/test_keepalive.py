@@ -35,3 +35,48 @@ def test_window_edges():
     """На границах окна: начало включительно, конец исключительно."""
     assert keepalive.in_window(_moment(7))
     assert not keepalive.in_window(_moment(23))
+
+
+def test_ping_retries_after_503(monkeypatch):
+    """Спящий контейнер отдаёт 503 - пинг должен повториться."""
+    import urllib.error
+
+    calls = []
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        calls.append(1)
+        if len(calls) < 2:
+            raise urllib.error.HTTPError("url", 503, "sleeping", {}, None)
+        return _Response()
+
+    monkeypatch.setattr(keepalive.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(keepalive, "_sleep", lambda seconds: None)
+
+    assert keepalive.ping(attempts=3) is True
+    assert len(calls) == 2
+
+
+def test_ping_gives_up_after_all_attempts(monkeypatch):
+    """Если сервис так и не проснулся - пинг считаем неудачным."""
+    import urllib.error
+
+    calls = []
+
+    def _fake_urlopen(request, timeout=None):
+        calls.append(1)
+        raise urllib.error.HTTPError("url", 503, "sleeping", {}, None)
+
+    monkeypatch.setattr(keepalive.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(keepalive, "_sleep", lambda seconds: None)
+
+    assert keepalive.ping(attempts=3) is False
+    assert len(calls) == 3

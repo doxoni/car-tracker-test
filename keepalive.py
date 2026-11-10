@@ -54,17 +54,35 @@ def in_window(moment: datetime) -> bool:
     return hour >= START_HOUR or hour < END_HOUR
 
 
-def ping(url: str = HEALTH_URL, timeout: int = 60) -> bool:
-    """Проверить, что сервис отвечает."""
+def _sleep(seconds: int) -> None:
+    """Пауза между попытками."""
+    import time
+
+    time.sleep(seconds)
+
+
+def ping(url: str = HEALTH_URL, timeout: int = 90, attempts: int = 3) -> bool:
+    """Проверить, что сервис отвечает.
+
+    Первый запрос к спящему контейнеру обычно не доходит до приложения:
+    Render показывает страницу "SERVICE WAKING UP" и отдаёт 503, пока
+    контейнер поднимается (это занимает до минуты). Поэтому повторяем.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": "car-tracker-keepalive"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return 200 <= response.status < 500
-    except urllib.error.HTTPError as error:
-        # Сервис отвечает, пусть и с ошибкой - значит он живой.
-        return error.code < 500
-    except Exception:
-        return False
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                if 200 <= response.status < 500:
+                    return True
+        except urllib.error.HTTPError as error:
+            # 503 - контейнер ещё поднимается, попробуем ещё раз.
+            if error.code < 500:
+                return True
+        except Exception:
+            pass
+        if attempt < attempts:
+            _sleep(20)
+    return False
 
 
 def main() -> None:
