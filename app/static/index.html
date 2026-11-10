@@ -713,6 +713,9 @@
   <button class="back" onclick="backToCars()">← Назад к списку</button>
   <div class="card" id="car-head"></div>
   <div class="card" id="car-stats" role="status" aria-live="polite"></div>
+  <button class="menu-btn hidden" id="car-claim" onclick="toggleClaimFromCar()">
+    <span class="ico">⭐</span><span class="txt" id="car-claim-text">В мой список</span><span class="arr">›</span>
+  </button>
   <h2>Добавить</h2>
   <button class="menu-btn" onclick="showFuelForm()">
     <span class="ico">⛽</span><span class="txt">Заправку</span><span class="arr">›</span>
@@ -953,6 +956,7 @@ if (tg) { tg.ready(); tg.expand(); }
 const INIT_DATA = (tg && tg.initData) || "";
 let currentCar = null;
 let currentCarPlate = "";  // госномер открытой машины (для формы правки номера)
+let currentCarClaimed = false;  // машина уже в моём списке
 let formKind = "";
 let historyRequest = null; // последний запрос истории — для кнопки «Повторить»
 
@@ -1695,7 +1699,7 @@ function loadCars() {
           "По запросу «" + searchQuery + "» машин нет");
       } else if (userLevel < 2) {
         box.innerHTML = emptyHtml("🔍", "Найдите свою машину",
-          "Введите номер или марку в поле поиска сверху");
+          "Введите номер или марку в поле поиска сверху и нажмите «В мой список»");
       } else {
         box.innerHTML = emptyHtml("🚗", "Пока нет машин", "Добавь первую — кнопка ниже");
       }
@@ -1719,6 +1723,12 @@ function loadCars() {
           '<span class="chip">Заправок: ' + car.fuel_count + '</span>' +
         '</div>' +
         '<div class="car-actions">' +
+          (userLevel < 2
+            ? '<button type="button" class="btn-secondary car-action" ' +
+                'onclick="event.stopPropagation(); toggleClaim(' + car.id + ', ' +
+                (car.claimed ? "true" : "false") + ')">' +
+                (car.claimed ? "✓ Уже в списке" : "⭐ В мой список") + '</button>'
+            : "") +
           '<button type="button" class="btn-secondary car-action" ' +
             'onclick="event.stopPropagation(); downloadCarHistory(' + car.id + ')">' +
             '⬇️ Скачать историю</button>' +
@@ -1768,6 +1778,21 @@ function openCar(carId) {
     if (downloadBtn && data.level >= 3) downloadBtn.classList.remove("hidden");
     const barrelBtn = document.getElementById("car-fill-barrel");
     if (barrelBtn && data.level >= 2) barrelBtn.classList.remove("hidden");
+    // Кнопка «в мой список» — только водителю (уровень 1).
+    const claimBtn = document.getElementById("car-claim");
+    if (claimBtn) {
+      if (data.level < 2) {
+        claimBtn.classList.remove("hidden");
+        currentCarClaimed = !!car.claimed;
+        const claimText = document.getElementById("car-claim-text");
+        if (claimText) {
+          claimText.textContent = currentCarClaimed
+            ? "Убрать из списка" : "В мой список";
+        }
+      } else {
+        claimBtn.classList.add("hidden");
+      }
+    }
     loadStats(carId);
   }).catch(function (error) {
     head.innerHTML = errorHtml("Не удалось загрузить", error.message, "openCar(" + carId + ")");
@@ -1788,6 +1813,37 @@ function claimCar(carId) {
     }
   }).catch(function (error) {
     alert("Ошибка сети: " + error.message);
+  });
+}
+
+// Добавление или удаление машины из личного списка (кнопка в карточке).
+function toggleClaim(carId, claimed) {
+  const method = claimed ? "DELETE" : "POST";
+  api("/api/cars/" + carId + "/claim", {method: method}).then(function (data) {
+    toast(data.message || (claimed ? "Машина убрана из списка" : "Машина добавлена в список"));
+    loadCars();
+  }).catch(function (error) {
+    toast("Не удалось: " + error.message);
+  });
+}
+
+// То же самое с экрана самой машины.
+function toggleClaimFromCar() {
+  if (!currentCar) return;
+  const carId = currentCar;
+  const wasClaimed = currentCarClaimed;
+  const method = wasClaimed ? "DELETE" : "POST";
+  api("/api/cars/" + carId + "/claim", {method: method}).then(function (data) {
+    currentCarClaimed = !wasClaimed;
+    const claimText = document.getElementById("car-claim-text");
+    if (claimText) {
+      claimText.textContent = currentCarClaimed
+        ? "Убрать из списка" : "В мой список";
+    }
+    toast(data.message || (currentCarClaimed
+      ? "Машина добавлена в список" : "Машина убрана из списка"));
+  }).catch(function (error) {
+    toast("Не удалось: " + error.message);
   });
 }
 

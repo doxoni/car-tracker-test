@@ -355,3 +355,128 @@ def test_level_three_sees_all_cars_without_search(client, app):
     assert len(response.get_json()["cars"]) == 1
 
 
+def _add_vehicle(app, plate: str = "АА1111АА", brand: str = "MAN"):
+    """Создать активную фуру от имени администратора."""
+    from app import db
+    from app.models import Vehicle
+
+    with app.app_context():
+        user = _make_user(3)
+        vehicle = Vehicle(
+            plate=plate,
+            brand=brand,
+            driver_id=user.id,
+            current_mileage=100000,
+            status="active",
+        )
+        db.session.add(vehicle)
+        db.session.commit()
+        return vehicle.id
+
+
+def test_claim_saves_car_to_my_list(client, app):
+    """Найденная по поиску машина сохраняется в список водителя."""
+    from app import db
+    from app.models import UserVehicle
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    response = client.post("/api/cars/%d/claim" % vehicle_id)
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["ok"] is True
+
+    with app.app_context():
+        link = UserVehicle.query.filter_by(vehicle_id=vehicle_id).first()
+        assert link is not None
+
+
+def test_claimed_car_visible_without_search(client, app):
+    """После сохранения машина видна в списке без поиска."""
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    client.post("/api/cars/%d/claim" % vehicle_id)
+
+    response = client.get("/api/cars")
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert len(data["cars"]) == 1
+    assert data["cars"][0]["id"] == vehicle_id
+    assert data["cars"][0]["claimed"] is True
+
+
+def test_claim_is_idempotent(client, app):
+    """Повторное добавление той же машины не дублирует запись."""
+    from app import db
+    from app.models import UserVehicle
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    client.post("/api/cars/%d/claim" % vehicle_id)
+    response = client.post("/api/cars/%d/claim" % vehicle_id)
+
+    assert response.status_code == 200
+    with app.app_context():
+        assert UserVehicle.query.filter_by(vehicle_id=vehicle_id).count() == 1
+
+
+def test_unclaim_removes_car_from_list(client, app):
+    """Машину можно убрать из своего списка."""
+    from app import db
+    from app.models import UserVehicle
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        _make_user(1)
+
+    client.post("/api/cars/%d/claim" % vehicle_id)
+    response = client.delete("/api/cars/%d/claim" % vehicle_id)
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+    with app.app_context():
+        assert UserVehicle.query.filter_by(vehicle_id=vehicle_id).count() == 0
+    assert client.get("/api/cars").get_json()["cars"] == []
+
+
+def test_claim_unknown_car_returns_404(client, app):
+    """Незначимая машина - ошибка 404 в старом формате."""
+    with app.app_context():
+        _make_user(1)
+
+    response = client.post("/api/cars/999999/claim")
+    data = response.get_json()
+
+    assert response.status_code == 404
+    assert data["ok"] is False
+    assert data["error"]
+
+
+def test_added_car_goes_to_my_list(client, app):
+    """Добавленная самим машина сразу попадает в личный список."""
+    from app import db
+    from app.models import UserVehicle
+
+    with app.app_context():
+        _make_user(1)
+
+    response = client.post(
+        "/api/cars",
+        json={"model": "MAN", "plate": "ВВ7777ВВ", "mileage": 100},
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["ok"] is True
+    with app.app_context():
+        assert UserVehicle.query.filter_by(vehicle_id=data["id"]).count() == 1
+
+

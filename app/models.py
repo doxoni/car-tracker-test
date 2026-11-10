@@ -4,6 +4,7 @@
 Таблицы:
 - users — пользователи бота (уровни: 1, 2, 3)
 - vehicles — фуры (связь: водитель → пользователь)
+- user_vehicles — личный список машин пользователя (связь many-to-many)
 - expenses — расходы (категория, сумма, дата, фото, статус approval)
 - fuel_barrels — емкости топлива (дизель/бензин)
 - fuel_inflow — приход топлива в бочку
@@ -114,6 +115,36 @@ class Vehicle(db.Model):
     @property
     def display_name(self):
         return f"{self.brand} ({self.plate})"
+
+
+class UserVehicle(db.Model):
+    """Личный список машин пользователя.
+
+    Аналог таблицы car_users старой системы: машина может принадлежать
+    нескольким водителям (каждый добавляет её себе в список), поэтому
+    связь хранится отдельной таблицей, а не в vehicles.driver_id.
+    """
+
+    __tablename__ = "user_vehicles"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Ограничение называем явно: на SQLite безымянные ограничения плохо
+    # переживают пересоздание таблицы.
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", name="uq_user_vehicles_user_vehicle"
+        ),
+    )
+
+    user = db.relationship("User", backref="user_vehicles", lazy=True)
+    vehicle = db.relationship("Vehicle", backref="user_vehicles", lazy=True)
+
+    def __repr__(self):
+        return f"<UserVehicle user={self.user_id} vehicle={self.vehicle_id}>"
 
 
 class Expense(db.Model):

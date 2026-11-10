@@ -34,6 +34,7 @@ from app.models import (
     FuelOutflow,
     Report,
     ServiceEntry,
+    UserVehicle,
     Vehicle,
 )
 
@@ -238,21 +239,60 @@ def _car_for_user(vehicle_id: int):
     return vehicle, None
 
 
+def _user_vehicle_ids(user_id: int) -> set:
+    """Номера машин из личного списка пользователя.
+
+    Результат кэшируется на время запроса: список машин считается для
+    каждой фуры отдельно, а запрос к базе тут один и тот же.
+    """
+    if not user_id:
+        return set()
+    cache = getattr(g, "_my_vehicle_ids", None)
+    if cache is not None and cache.get("user_id") == user_id:
+        return cache["ids"]
+    ids = {
+        row.vehicle_id
+        for row in UserVehicle.query.filter_by(user_id=user_id).all()
+    }
+    g._my_vehicle_ids = {"user_id": user_id, "ids": ids}
+    return ids
+
+
+def _current_user_id() -> int:
+    """Номер текущего пользователя (0 — нет доступа)."""
+    user = getattr(g, "current_user", None)
+    return int(user.id) if user is not None else 0
+
+
 def _visible_vehicles(query: str = ""):
     """Фуры, доступные пользователю.
 
-    Уровень 2 и выше видят все фуры. Водитель (уровень 1) видит только
-    то, что нашлось по поиску: без поискового запроса список пустой.
-    При поиске видны все подходящие фуры, чтобы можно было найти
-    нужную машину.
+    Уровень 2 и выше видят все фуры. Водитель (уровень 1) видит свой
+    личный список (машины, которые он добавил себе через поиск) и то,
+    что нашлось по поиску: без поискового запроса показываем только
+    личный список. При поиске видны все подходящие фуры, чтобы можно
+    было найти нужную машину.
     """
     level = _level()
     if query:
-        return Vehicle.query.order_by(Vehicle.id.asc()).all()
+        # Поиском водитель видит активные фуры, админ - все.
+        query_set = Vehicle.query
+        if level < 2:
+            query_set = query_set.filter(Vehicle.status == "active")
+        return query_set.order_by(Vehicle.id.asc()).all()
     if _is_full_admin(level):
         return Vehicle.query.order_by(Vehicle.id.asc()).all()
     if level < 2:
-        return []
+        my_ids = _user_vehicle_ids(_current_user_id())
+        if not my_ids:
+            return []
+        return (
+            Vehicle.query.filter(
+                Vehicle.id.in_(my_ids), Vehicle.status == "active"
+            )
+            .order_by(Vehicle.id.asc())
+            .all()
+        )
     return Vehicle.query.filter(
         Vehicle.status == "active"
     ).order_by(Vehicle.id.asc()).all()
@@ -353,7 +393,8 @@ def _car_summary(vehicle: Vehicle) -> dict:
     item["avg_consumption"] = stats.get("avg_consumption")
     item["total_fuel_amount"] = round(stats.get("total_amount", 0), 2)
     item["is_truck"] = _is_truck_model(vehicle.brand or "")
-    item["claimed"] = False
+    # Машина в личном списке пользователя (добавлена через поиск).
+    item["claimed"] = vehicle.id in _user_vehicle_ids(_current_user_id())
     return item
 
 
@@ -502,7 +543,9 @@ def api_car(vehicle_id: int):
     vehicle, error = _car_for_user(vehicle_id)
     if error:
         return error
-    return jsonify({"ok": True, "car": _car_summary(vehicle)})
+    return jsonify(
+        {"ok": True, "car": _car_summary(vehicle), "level": _level()}
+    )
 
 
 @bp.get("/cars/<int:vehicle_id>/stats")
@@ -519,17 +562,51 @@ def api_car_stats(vehicle_id: int):
 @bp.post("/cars/<int:vehicle_id>/claim")
 @require_auth
 def api_claim_car(vehicle_id: int):
-    """Добавляет фуру в свой список.
+    """Добавляет фуру в личный список пользователя.
 
-    В новой системе фуры и так видны всем активным, поэтому действие
-    ничего не меняет — только подтверждает, что машина найдена.
+    Машина, найденная поиском, сохраняется в таблицу user_vehicles -
+    после этого она видна в «Моих автомобилях» без повторного поиска.
     """
     vehicle = _vehicle_by_id(vehicle_id)
     if vehicle is None:
         return _fail("машина не найдена", 404)
-    if _is_admin(_level()):
-        return jsonify({"ok": True, "message": "админ видит все машины"}), 200
+    if (vehicle.status or "active") != "active":
+        return _fail("нет доступа к этой машине", 403)
+
+    user_id = _current_user_id()
+    if not user_id:
+        return _fail("нет доступа", 401)
+
+    existing = UserVehicle.query.filter_by(
+        user_id=user_id, vehicle_id=vehicle.id
+    ).first()
+    if existing is None:
+        db.session.add(UserVehicle(user_id=user_id, vehicle_id=vehicle.id))
+        db.session.commit()
+    g._my_vehicle_ids = None
     return jsonify({"ok": True, "message": "машина добавлена в ваш список"})
+
+
+@bp.delete("/cars/<int:vehicle_id>/claim")
+@require_auth
+def api_unclaim_car(vehicle_id: int):
+    """Убирает фуру из личного списка пользователя."""
+    vehicle = _vehicle_by_id(vehicle_id)
+    if vehicle is None:
+        return _fail("машина не найдена", 404)
+
+    user_id = _current_user_id()
+    if not user_id:
+        return _fail("нет доступа", 401)
+
+    existing = UserVehicle.query.filter_by(
+        user_id=user_id, vehicle_id=vehicle.id
+    ).first()
+    if existing is not None:
+        db.session.delete(existing)
+        db.session.commit()
+    g._my_vehicle_ids = None
+    return jsonify({"ok": True, "message": "машина убрана из вашего списка"})
 
 
 @bp.post("/cars")
@@ -570,6 +647,10 @@ def api_add_car():
         status="active",
     )
     db.session.add(vehicle)
+    db.session.flush()
+    # Новая машина сразу попадает в личный список добавившего её.
+    if user is not None:
+        db.session.add(UserVehicle(user_id=user.id, vehicle_id=vehicle.id))
     db.session.commit()
     return jsonify({"ok": True, "id": vehicle.id, "message": "Машина добавлена"})
 
