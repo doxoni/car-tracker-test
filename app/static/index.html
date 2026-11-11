@@ -299,6 +299,14 @@
     color: var(--chip_text); font-size: 11.5px;
   }
   .item-badge.bad { background: var(--danger_soft); color: var(--danger); }
+  /* Кнопки проверки записи: принять или отклонить. */
+  .item-review { display: flex; gap: 8px; margin-top: 8px; }
+  .item-review button {
+    flex: 1 1 0; min-height: 40px; font-size: 14px; font-weight: 600;
+    border-radius: 12px; padding: 0 10px;
+  }
+  .item-review .ok { background: var(--ok); color: #ffffff; }
+  .item-review .no { background: var(--btn2); color: var(--btn2_text); border: 1px solid var(--line); }
   .report-item { border-bottom: 1px solid var(--line); padding: 12px 0; }
   .report-item:last-child { border-bottom: 0; }
   .report-item-top { display: flex; align-items: center; gap: 10px; }
@@ -713,6 +721,7 @@
   <div id="cars-list" role="status" aria-live="polite"></div>
   <button class="btn-secondary" id="btn-main-1" onclick="showAddCar()">➕ Добавить автомобиль</button>
   <button class="btn-secondary" id="btn-main-2" onclick="showReport()">📊 Отчёт</button>
+  <button class="btn-secondary hidden" id="btn-review" onclick="showReview()">✅ На проверке</button>
 </div>
 
 <div id="screen-car" class="hidden">
@@ -875,6 +884,12 @@
   <div class="card" id="costs-summary"></div>
   <h2>По машинам</h2>
   <div class="card" id="costs-cars"></div>
+</div>
+
+<div id="screen-review" class="hidden">
+  <button class="back" onclick="backToCars()">← Назад к списку</button>
+  <h1>✅ На проверке</h1>
+  <div class="card" id="review-body"></div>
 </div>
 
 <div id="screen-report-form" class="hidden">
@@ -1571,7 +1586,7 @@ function formatDate(s) {
 function show(id) {
   ["screen-cars", "screen-car", "screen-form", "screen-history", "screen-addcar",
    "screen-barrel", "screen-report", "screen-report-form", "screen-reports-list",
-   "screen-costs"]
+   "screen-costs", "screen-review"]
     .forEach(function (name) {
       document.getElementById(name).classList.add("hidden");
     });
@@ -2152,6 +2167,9 @@ function renderTopButtons() {
   if (reportBtn) reportBtn.classList.toggle("hidden", userLevel < 3);
   const costsBtn = document.getElementById("btn-costs");
   if (costsBtn) costsBtn.classList.toggle("hidden", userLevel < 2);
+  // «На проверке» — третьему уровню: он принимает и отклоняет записи.
+  const reviewBtn = document.getElementById("btn-review");
+  if (reviewBtn) reviewBtn.classList.toggle("hidden", userLevel < 3);
 }
 
 // Сумма за месяц рядом с кнопкой «Затраты».
@@ -3685,6 +3703,80 @@ function statusBadge(item) {
   return "";
 }
 
+// Кнопки проверки записи: только у третьего уровня и только для записей
+// на проверке.
+function reviewButtons(item, kind, vehicleId) {
+  if (userLevel < 3 || item.status !== "pending") return "";
+  const id = Number(item.id);
+  if (!id) return "";
+  const car = Number(vehicleId || item.vehicle_id || currentCar) || 0;
+  if (!car) return "";
+  return '<div class="item-review">' +
+    '<button class="ok" onclick="askReview(\'' + kind + '\', ' + car + ', ' + id + ', true)">✅ Принять</button>' +
+    '<button class="no" onclick="askReview(\'' + kind + '\', ' + car + ', ' + id + ', false)">❌ Отклонить</button>' +
+    '</div>';
+}
+
+// Принять или отклонить запись (kind - "services" или "fuel").
+function askReview(kind, vehicleId, id, approved) {
+  const title = approved ? "Принять запись?" : "Отклонить запись?";
+  const text = approved
+    ? "Запись будет учтена в суммах и отчётах."
+    : "Запись не попадёт в суммы и отчёты.";
+  openModal(title, text, function () { sendReview(kind, vehicleId, id, approved); },
+    approved ? "Принять" : "Отклонить");
+}
+
+function sendReview(kind, vehicleId, id, approved) {
+  const action = approved ? "approve" : "reject";
+  const path = "/api/cars/" + vehicleId + "/" + kind + "/" + id + "/" + action;
+  api(path, { method: "POST" }).then(function (data) {
+    haptic();
+    toast(data.message || (approved ? "Запись принята" : "Запись отклонена"));
+    if (historyRequest) loadHistory(historyRequest.path, historyRequest.key, historyRequest.render);
+    if (!document.getElementById("screen-review").classList.contains("hidden")) loadReview();
+  }).catch(function (error) {
+    toast("Не удалось: " + error.message);
+  });
+}
+
+// ---------- записи на проверке ----------
+
+function showReview() {
+  show("screen-review");
+  loadReview();
+}
+
+function loadReview() {
+  const body = document.getElementById("review-body");
+  body.innerHTML = loadingHtml("Загружаю…");
+  api("/api/review/pending").then(function (data) {
+    const items = data.items || [];
+    if (!items.length) {
+      body.innerHTML = emptyHtml("✅", "Проверять нечего", "Все записи подтверждены");
+      return;
+    }
+    let html = '<div class="hist-list" id="review-list"></div>';
+    body.innerHTML = html;
+    const list = document.getElementById("review-list");
+    items.forEach(function (item) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const kind = item.kind === "service" ? "services" : "fuel";
+      const icon = item.kind === "service" ? "🔧" : "⛽";
+      row.innerHTML = '<div class="item-top">' +
+        '<span class="item-title">' + icon + ' ' + esc(item.title) + '</span>' +
+        '<span class="item-sum">' + money(item.amount) + '</span></div>' +
+        '<div class="item-sub">' + esc(item.brand) + ' (' + esc(item.plate) + ') · ' +
+        dateTime(item.created_at) + '</div>' +
+        reviewButtons(Object.assign({ status: "pending" }, item), kind, item.vehicle_id);
+      list.appendChild(row);
+    });
+  }).catch(function (error) {
+    body.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadReview()");
+  });
+}
+
 function renderFuel(item) {
   if (item.source === "barrel") {
     // Заправка из бочки: цены нет, зато видно, откуда лили.
@@ -3699,7 +3791,8 @@ function renderFuel(item) {
     '<span class="item-sum">' + money(item.amount) + '</span></div>' +
     '<div class="item-sub">' + num(item.odometer) + ' км · ' + dateTime(item.created_at) +
     (item.is_full ? ' · полный бак' : ' · частично') + '</div>' +
-    statusBadge(item);
+    statusBadge(item) +
+    reviewButtons(item, "fuel");
 }
 
 function renderServices(item) {
@@ -3717,7 +3810,8 @@ function renderServices(item) {
           'onclick="askDeleteService(' + Number(item.id) + ')">✕</button>'
       : "") + '</div>' +
     '<div class="item-sub">' + sub + '</div>' +
-    statusBadge(item);
+    statusBadge(item) +
+    reviewButtons(item, "services");
   // Подробности добавляем отдельной строкой, если они есть.
   if (item.details) {
     html += '<div class="item-sub">' + esc(item.details) + '</div>';

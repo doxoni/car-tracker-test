@@ -1020,6 +1020,172 @@ def api_delete_service(vehicle_id: int, service_id: int):
     )
 
 
+# ---------- Проверка записей на проверке ----------
+
+
+def _review_entry(model, vehicle_id: int, entry_id: int, approved: bool):
+    """Принять или отклонить запись, ждущую проверки.
+
+    Проверять может только третий уровень. Возвращает ответ с ошибкой
+    или None, если всё прошло.
+    """
+    if _level() < 3:
+        return _fail("проверять записи может только 3 уровень", 403)
+
+    entry = db.session.get(model, entry_id)
+    if entry is None or entry.vehicle_id != vehicle_id:
+        return _fail("запись не найдена", 404)
+    if (entry.status or "approved") != "pending":
+        return _fail("запись уже разобрана", 409)
+
+    entry.status = "approved" if approved else "rejected"
+    entry.approved_by = _current_user_id() or None
+    entry.approved_at = datetime.utcnow()
+    db.session.commit()
+
+    try:
+        from app.notifications import notify_review_result
+
+        notify_review_result("service" if model is ServiceEntry else "fuel", entry, approved)
+    except Exception as error:
+        print(f"Не удалось отправить уведомление о решении: {error}")
+    return None
+
+
+@bp.get("/review/pending")
+@require_auth
+def api_pending_entries():
+    """Все записи на проверке: заправки и обслуживания.
+
+    Нужен третьему уровню - принять или отклонить их можно отсюда.
+    """
+    if _level() < 3:
+        return _fail("список проверки доступен только с 3 уровнем", 403)
+
+    items = []
+    fuels = (
+        FuelEntry.query.filter_by(status="pending")
+        .order_by(FuelEntry.created_at.desc(), FuelEntry.id.desc())
+        .all()
+    )
+    for row in fuels:
+        vehicle = db.session.get(Vehicle, row.vehicle_id)
+        items.append(
+            {
+                "kind": "fuel",
+                "id": row.id,
+                "vehicle_id": row.vehicle_id,
+                "brand": vehicle.brand if vehicle else "",
+                "plate": vehicle.plate if vehicle else "",
+                "title": f"{float(row.liters or 0):.1f} л",
+                "amount": float(row.amount or 0),
+                "created_at": _iso(row.created_at),
+            }
+        )
+
+    services = (
+        ServiceEntry.query.filter_by(status="pending")
+        .order_by(ServiceEntry.created_at.desc(), ServiceEntry.id.desc())
+        .all()
+    )
+    for row in services:
+        vehicle = db.session.get(Vehicle, row.vehicle_id)
+        items.append(
+            {
+                "kind": "service",
+                "id": row.id,
+                "vehicle_id": row.vehicle_id,
+                "brand": vehicle.brand if vehicle else "",
+                "plate": vehicle.plate if vehicle else "",
+                "title": row.description or "",
+                "amount": float(row.amount or 0),
+                "created_at": _iso(row.created_at),
+            }
+        )
+
+    return jsonify({"ok": True, "items": items})
+
+
+@bp.post("/cars/<int:vehicle_id>/services/<int:service_id>/approve")
+@require_auth
+def api_approve_service(vehicle_id: int, service_id: int):
+    """Принять запись об обслуживании, ждущую проверки."""
+    vehicle, error = _car_for_user(vehicle_id)
+    if error:
+        return error
+    error = _review_entry(ServiceEntry, vehicle.id, service_id, True)
+    if error:
+        return error
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Запись принята",
+            "total": _total_expenses(vehicle.id),
+            "odometer": int(vehicle.current_mileage or 0),
+        }
+    )
+
+
+@bp.post("/cars/<int:vehicle_id>/services/<int:service_id>/reject")
+@require_auth
+def api_reject_service(vehicle_id: int, service_id: int):
+    """Отклонить запись об обслуживании, ждущую проверки."""
+    vehicle, error = _car_for_user(vehicle_id)
+    if error:
+        return error
+    error = _review_entry(ServiceEntry, vehicle.id, service_id, False)
+    if error:
+        return error
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Запись отклонена",
+            "total": _total_expenses(vehicle.id),
+            "odometer": int(vehicle.current_mileage or 0),
+        }
+    )
+
+
+@bp.post("/cars/<int:vehicle_id>/fuel/<int:fuel_id>/approve")
+@require_auth
+def api_approve_fuel(vehicle_id: int, fuel_id: int):
+    """Принять заправку, ждущую проверки."""
+    vehicle, error = _car_for_user(vehicle_id)
+    if error:
+        return error
+    error = _review_entry(FuelEntry, vehicle.id, fuel_id, True)
+    if error:
+        return error
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Заправка принята",
+            "total": _total_expenses(vehicle.id),
+            "odometer": int(vehicle.current_mileage or 0),
+        }
+    )
+
+
+@bp.post("/cars/<int:vehicle_id>/fuel/<int:fuel_id>/reject")
+@require_auth
+def api_reject_fuel(vehicle_id: int, fuel_id: int):
+    """Отклонить заправку, ждущую проверки."""
+    vehicle, error = _car_for_user(vehicle_id)
+    if error:
+        return error
+    error = _review_entry(FuelEntry, vehicle.id, fuel_id, False)
+    if error:
+        return error
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Заправка отклонена",
+            "total": _total_expenses(vehicle.id),
+            "odometer": int(vehicle.current_mileage or 0),
+        }
+    )
+
+
 @bp.get("/cars/<int:vehicle_id>/expenses")
 @require_auth
 def api_expenses(vehicle_id: int):

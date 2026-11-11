@@ -598,6 +598,173 @@ def test_level_one_cannot_delete_approved_service(client, app):
     assert response.get_json()["ok"] is False
 
 
+def test_level_three_can_approve_service(client, app):
+    """Третий уровень принимает обслуживание через Mini App."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1500,
+            description="замена масла",
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+        _make_user(3)
+
+    response = client.post(
+        "/api/cars/%d/services/%d/approve" % (vehicle_id, service_id)
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+    with app.app_context():
+        entry = db.session.get(ServiceEntry, service_id)
+        assert entry.status == "approved"
+        assert entry.approved_by is not None
+
+
+def test_level_three_can_reject_service(client, app):
+    """Третий уровень отклоняет обслуживание через Mini App."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1500,
+            description="замена масла",
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+        _make_user(3)
+
+    response = client.post(
+        "/api/cars/%d/services/%d/reject" % (vehicle_id, service_id)
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        entry = db.session.get(ServiceEntry, service_id)
+        assert entry.status == "rejected"
+
+
+def test_level_three_can_approve_fuel(client, app):
+    """Третий уровень принимает заправку через Mini App."""
+    from app import db
+    from app.models import FuelEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        entry = FuelEntry(
+            vehicle_id=vehicle_id,
+            liters=100,
+            price=40,
+            amount=4000,
+            odometer=100000,
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(entry)
+        db.session.commit()
+        entry_id = entry.id
+        _make_user(3)
+
+    response = client.post("/api/cars/%d/fuel/%d/approve" % (vehicle_id, entry_id))
+
+    assert response.status_code == 200
+    with app.app_context():
+        assert db.session.get(FuelEntry, entry_id).status == "approved"
+
+
+def test_driver_cannot_approve_service(client, app):
+    """Водитель принять запись не может."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1500,
+            description="замена масла",
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+
+    response = client.post(
+        "/api/cars/%d/services/%d/approve" % (vehicle_id, service_id)
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
+def test_pending_list_shows_entries(client, app):
+    """Список на проверке отдаёт записи обоих видов."""
+    from app import db
+    from app.models import FuelEntry, ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        db.session.add(
+            ServiceEntry(
+                vehicle_id=vehicle_id,
+                amount=1500,
+                description="замена масла",
+                status="pending",
+                submitted_by=user.id,
+            )
+        )
+        db.session.add(
+            FuelEntry(
+                vehicle_id=vehicle_id,
+                liters=100,
+                price=40,
+                amount=4000,
+                odometer=100000,
+                status="pending",
+                submitted_by=user.id,
+            )
+        )
+        db.session.commit()
+        _make_user(3)
+
+    data = client.get("/api/review/pending").get_json()
+
+    assert data["ok"] is True
+    kinds = sorted(item["kind"] for item in data["items"])
+    assert kinds == ["fuel", "service"]
+
+
+def test_pending_list_is_hidden_from_driver(client, app):
+    """Водитель список проверки не видит."""
+    with app.app_context():
+        _make_user(1)
+
+    response = client.get("/api/review/pending")
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
 def test_level_one_can_delete_own_pending_service(client, app):
     """Свою запись, пока она на проверке, водитель удалить может."""
     from app import db
