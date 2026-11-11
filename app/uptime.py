@@ -105,7 +105,7 @@ class UptimeClient:
         url = f"{self.base_url}{path}"
         data = json.dumps(body).encode("utf-8") if body is not None else None
 
-        for attempt in range(3):
+        for attempt in range(4):
             request = urllib.request.Request(url, data=data, method=method)
             request.add_header("Authorization", f"Bearer {self.api_key}")
             request.add_header("Accept", "application/json")
@@ -117,9 +117,9 @@ class UptimeClient:
                     payload = response.read().decode("utf-8", "replace")
             except urllib.error.HTTPError as error:
                 detail = error.read().decode("utf-8", "replace")[:300]
-                if error.code == 429 and attempt < 2:
-                    # Слишком много запросов - ждём и повторяем.
-                    time.sleep(10)
+                if error.code == 429 and attempt < 3:
+                    # Слишком много запросов (10 в минуту) - ждём и повторяем.
+                    time.sleep(20)
                     continue
                 raise UptimeError(f"{method} {path} -> {error.code}: {detail}") from error
             except Exception as error:  # noqa: BLE001 - сеть может отвалиться
