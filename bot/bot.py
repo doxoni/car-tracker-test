@@ -219,9 +219,11 @@ def _submitter_name(user) -> str:
 
 def _entry_data(kind: str, entry) -> dict:
     """Данные записи для показа в боте (без лишних запросов)."""
-    vehicle = db.session.get(Vehicle, entry.vehicle_id)
+    vehicle = run_with_retry(lambda: db.session.get(Vehicle, entry.vehicle_id))
     submitter = (
-        db.session.get(User, entry.submitted_by) if entry.submitted_by else None
+        run_with_retry(lambda: db.session.get(User, entry.submitted_by))
+        if entry.submitted_by
+        else None
     )
     created = entry.created_at
     return {
@@ -319,25 +321,35 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _apply_review(kind: str, entry_id: int, approved: bool, tg_id: int):
-    """Принять или отклонить запись на проверке."""
+    """Принять или отклонить запись на проверке.
+
+    Возвращает данные записи или None, если записи нет или она уже
+    разобрана. Ошибка БД поднимается наружу - вызывающий сообщит
+    пользователю, что не получилось, и предложит повторить.
+    """
     application = app_context()
     with application.app_context():
         model = FuelEntry if kind == "fuel" else ServiceEntry
-        entry = db.session.get(model, entry_id)
+        entry = run_with_retry(lambda: db.session.get(model, entry_id))
         if entry is None or (entry.status or "approved") != "pending":
             return None
+        # Проверяющий ищется по Telegram ID, а не по внутреннему ключу.
+        user = run_with_retry(lambda: User.query.filter_by(tg_id=tg_id).first())
         entry.status = "approved" if approved else "rejected"
-        user = db.session.get(User, tg_id)
         entry.approved_by = user.id if user else None
         entry.approved_at = datetime.utcnow()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
         data = _entry_data(kind, entry)
         try:
             from app.notifications import notify_review_result
 
             notify_review_result(kind, entry, approved)
         except Exception as error:
-            print(f"⚠️ Не удалось отправить уведомление о решении: {error}")
+            print(f"Не удалось отправить уведомление о решении: {error}")
     return data
 
 
@@ -362,7 +374,17 @@ async def review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         return
 
-    result = _apply_review(kind, entry_id, action == "ok", tg_id)
+    try:
+        result = _apply_review(kind, entry_id, action == "ok", tg_id)
+    except Exception as error:
+        # База могла уснуть - говорим об этом и предлагаем повторить.
+        print(f"Не удалось разобрать запись на проверке: {error}")
+        await query.answer(
+            t("Не получилось, база данных недоступна. Попробуйте ещё раз.", lang),
+            show_alert=True,
+        )
+        return
+
     if result is None:
         await query.edit_message_text(t("Запись не найдена или уже разобрана.", lang))
         return

@@ -66,6 +66,37 @@ def _add_pending_fuel(app, status="pending"):
         return entry.id
 
 
+def _add_pending_service(app, status="pending"):
+    """Обслуживание, ждущее проверки."""
+    from app import db
+    from app.models import ServiceEntry, User, Vehicle
+
+    with app.app_context():
+        user = User(tg_id=111, level=1, is_whitelisted=True)
+        db.session.add(user)
+        db.session.commit()
+        vehicle = Vehicle(
+            plate="АА1111АА",
+            brand="MAN",
+            driver_id=user.id,
+            current_mileage=100000,
+            status="active",
+        )
+        db.session.add(vehicle)
+        db.session.commit()
+        entry = ServiceEntry(
+            vehicle_id=vehicle.id,
+            amount=1500.0,
+            description="Замена масла",
+            odometer=100000,
+            status=status,
+            submitted_by=user.id,
+        )
+        db.session.add(entry)
+        db.session.commit()
+        return entry.id
+
+
 def test_pending_entries_are_listed(app_context):
     """Заправка на проверке попадает в список."""
     entry_id = _add_pending_fuel(app_context)
@@ -77,6 +108,19 @@ def test_pending_entries_are_listed(app_context):
     assert kind == "fuel"
     assert listed_id == entry_id
     assert data["amount"] == 4000.0
+
+
+def test_pending_service_is_listed(app_context):
+    """Обслуживание на проверке попадает в список."""
+    entry_id = _add_pending_service(app_context)
+
+    items = _pending_entries()
+
+    assert len(items) == 1
+    kind, listed_id, data = items[0]
+    assert kind == "service"
+    assert listed_id == entry_id
+    assert data["description"] == "Замена масла"
 
 
 def test_approved_entry_leaves_the_list(app_context):
@@ -96,6 +140,45 @@ def test_rejected_entry_leaves_the_list(app_context):
 
     assert result is not None
     assert _pending_entries() == []
+
+
+def test_service_can_be_approved(app_context):
+    """Обслуживание на проверке можно принять."""
+    entry_id = _add_pending_service(app_context)
+
+    assert _apply_review("service", entry_id, True, 222) is not None
+    assert _pending_entries() == []
+
+
+def test_service_can_be_rejected(app_context):
+    """Обслуживание на проверке можно отклонить."""
+    entry_id = _add_pending_service(app_context)
+
+    assert _apply_review("service", entry_id, False, 222) is not None
+    assert _pending_entries() == []
+
+
+def test_approved_by_is_set_to_reviewer(app_context):
+    """Кто принял - фиксируется по Telegram ID проверяющего."""
+    from app import db
+    from app.models import ServiceEntry, User
+
+    entry_id = _add_pending_service(app_context)
+
+    with app_context.app_context():
+        reviewer = User(tg_id=222, level=3, is_whitelisted=True)
+        db.session.add(reviewer)
+        db.session.commit()
+        reviewer_id = reviewer.id
+
+    assert _apply_review("service", entry_id, True, 222) is not None
+
+    with app_context.app_context():
+        db.session.expire_all()
+        entry = db.session.get(ServiceEntry, entry_id)
+        assert entry.status == "approved"
+        assert entry.approved_by == reviewer_id
+        assert entry.approved_at is not None
 
 
 def test_review_of_unknown_entry_returns_none(app_context):

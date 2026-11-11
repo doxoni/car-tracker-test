@@ -969,7 +969,8 @@ def api_add_service(vehicle_id: int):
     db.session.add(service)
     db.session.commit()
     if service.status == "pending":
-        _notify_review("service", service)
+        # Уведомление о добавлении обслуживания не присылаем:
+        # проверяющий сам смотрит список по команде /cheak.
         message = "Обслуживание отправлено на проверку"
     else:
         message = "Обслуживание записано"
