@@ -15,7 +15,7 @@ fuel_entries, service_entries, reports, fuel_barrels).
     python app/main.py
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, Response, g, jsonify, request
 
@@ -448,17 +448,56 @@ def _car_summary(vehicle: Vehicle) -> dict:
     return item
 
 
-def _month_start() -> datetime:
-    """Начало текущего месяца."""
-    now = datetime.now()
-    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+def _parse_iso_date(value) -> date | None:
+    """Дата в виде ГГГГ-ММ-ДД. Пустая или кривая дата - None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
-def _in_month(value: datetime) -> bool:
-    """Дата попадает в текущий месяц."""
+def _period_from_request(default_all: bool = False) -> tuple:
+    """Период из запроса: (с, по) как даты.
+
+    Если параметров «from»/«to» нет вовсе - берётся текущий месяц.
+    Для отчёта по бочке (default_all=True) без параметров считается
+    вся история.
+    Если параметр есть, но пустой - с этой стороны ограничения нет
+    (так работает выбор «всё время»).
+    """
+    if "from" not in request.args and "to" not in request.args:
+        if default_all:
+            return None, None
+        today = date.today()
+        return today.replace(day=1), today
+    return _parse_iso_date(request.args.get("from")), _parse_iso_date(request.args.get("to"))
+
+
+def _in_period(value, from_date: date | None, to_date: date | None) -> bool:
+    """Дата попадает в выбранный период.
+
+    Дата может быть объектом datetime/date или строкой вида
+    «ГГГГ-ММ-ДД ЧЧ:ММ:СС» - как отдаёт бочка.
+    """
     if not value:
         return False
-    return value >= _month_start()
+    if isinstance(value, str):
+        try:
+            day = datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return False
+    elif isinstance(value, datetime):
+        day = value.date()
+    else:
+        day = value
+    if from_date and day < from_date:
+        return False
+    if to_date and day > to_date:
+        return False
+    return True
 
 
 def _barrel_rows() -> list:
@@ -1381,6 +1420,45 @@ def api_barrel_list():
     )
 
 
+@bp.get("/barrel-report")
+@require_auth
+def api_barrel_report():
+    """Отчёт по бочке за выбранный период.
+
+    Период задаётся параметрами «from» и «to» (ГГГГ-ММ-ДД). Если их
+    нет - считается весь период.
+
+    Доступно с 2 уровня (оператор) и выше.
+    """
+    if not _is_full_admin(_level()):
+        return _fail("бочка доступна только у администратора полного доступа", 403)
+
+    from_date, to_date = _period_from_request(default_all=True)
+    totals = {
+        fuel_type: {"add": 0.0, "fill": 0.0, "sub": 0.0} for fuel_type in BARREL_TYPES
+    }
+    for item in _barrel_rows():
+        created = item.get("created_at")
+        if not _in_period(created, from_date, to_date):
+            continue
+        group = totals.get(item["fuel_type"])
+        if group is None:
+            continue
+        group[item["action"]] = round(group[item["action"]] + item["liters"], 1)
+
+    return jsonify(
+        {
+            "ok": True,
+            "report": {
+                "from": from_date.isoformat() if from_date else None,
+                "to": to_date.isoformat() if to_date else None,
+                "totals": totals,
+                "balance": _barrel_balance(),
+            },
+        }
+    )
+
+
 @bp.post("/barrel")
 @require_auth
 def api_barrel_add():
@@ -1482,7 +1560,10 @@ def api_barrel_clear():
 @bp.get("/month-costs")
 @require_auth
 def api_month_costs():
-    """Итоговые затраты за текущий месяц по видимым фурам.
+    """Затраты за выбранный период по видимым фурам.
+
+    Период задаётся параметрами «from» и «to» (ГГГГ-ММ-ДД). Если их
+    нет - считается текущий месяц.
 
     Доступно с 2 уровня (оператор) и выше.
     """
@@ -1490,20 +1571,20 @@ def api_month_costs():
         return _fail("затраты доступны с 2 уровня", 403)
 
     vehicles = _visible_vehicles()
-    month_start = _month_start()
+    from_date, to_date = _period_from_request()
     totals = {"expenses": 0.0, "fuel": 0.0, "services": 0.0, "total": 0.0}
     car_items = []
 
     for vehicle in vehicles:
         car_totals = {"expenses": 0.0, "fuel": 0.0, "services": 0.0, "total": 0.0}
         for expense in _expense_rows(vehicle.id):
-            if _in_month(expense.date):
+            if _in_period(expense.date, from_date, to_date):
                 car_totals["expenses"] += float(expense.amount or 0)
         for entry in _approved_rows(_fuel_rows(vehicle.id)):
-            if _in_month(entry.created_at):
+            if _in_period(entry.created_at, from_date, to_date):
                 car_totals["fuel"] += float(entry.amount or 0)
         for service in _approved_rows(_service_rows(vehicle.id)):
-            if _in_month(service.created_at):
+            if _in_period(service.created_at, from_date, to_date):
                 car_totals["services"] += float(service.amount or 0)
         for key in ("expenses", "fuel", "services"):
             car_totals[key] = round(car_totals[key], 2)
@@ -1530,7 +1611,9 @@ def api_month_costs():
         {
             "ok": True,
             "costs": {
-                "month": month_start.strftime("%Y-%m"),
+                "month": (from_date or date.today()).strftime("%Y-%m"),
+                "from": from_date.isoformat() if from_date else None,
+                "to": to_date.isoformat() if to_date else None,
                 "totals": totals,
                 "cars": car_items,
             },

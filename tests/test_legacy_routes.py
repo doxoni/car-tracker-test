@@ -242,6 +242,165 @@ def test_level_two_can_see_costs(client, app):
     assert response.get_json()["ok"] is True
 
 
+def test_costs_cover_only_chosen_period(client, app):
+    """Затраты считаются только за выбранный период."""
+    from datetime import datetime
+
+    from app import db
+    from app.models import Expense, FuelEntry, Vehicle
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(2)
+        vehicle = db.session.get(Vehicle, vehicle_id)
+        db.session.add(
+            Expense(
+                vehicle_id=vehicle_id,
+                category="ремонт",
+                amount=1000,
+                date=datetime(2026, 3, 10),
+                status="approved",
+                submitted_by=user.id,
+                approved_by=user.id,
+            )
+        )
+        db.session.add(
+            Expense(
+                vehicle_id=vehicle_id,
+                category="ремонт",
+                amount=2000,
+                date=datetime(2026, 5, 10),
+                status="approved",
+                submitted_by=user.id,
+                approved_by=user.id,
+            )
+        )
+        db.session.add(
+            FuelEntry(
+                vehicle_id=vehicle_id,
+                liters=100,
+                price=40,
+                amount=4000,
+                odometer=100000,
+                created_at=datetime(2026, 5, 11),
+                status="approved",
+                submitted_by=user.id,
+                approved_by=user.id,
+            )
+        )
+        db.session.commit()
+
+    data = client.get(
+        "/api/month-costs?from=2026-05-01&to=2026-05-31"
+    ).get_json()["costs"]
+
+    assert data["from"] == "2026-05-01"
+    assert data["to"] == "2026-05-31"
+    assert data["totals"]["expenses"] == 2000
+    assert data["totals"]["fuel"] == 4000
+    assert data["totals"]["total"] == 6000
+
+
+def test_costs_without_period_stay_on_current_month(client, app):
+    """Без параметров периода считается текущий месяц."""
+    with app.app_context():
+        _make_user(2)
+
+    data = client.get("/api/month-costs").get_json()["costs"]
+
+    assert data["from"] is not None
+    assert data["to"] is not None
+
+
+def test_barrel_report_cover_only_chosen_period(client, app):
+    """Отчёт по бочке считается за выбранный период."""
+    from datetime import datetime
+
+    from app import db
+    from app.models import FuelBarrel, FuelInflow
+
+    with app.app_context():
+        _make_user(2)
+        barrel = FuelBarrel(
+            name="Бочка дизель",
+            fuel_type="diesel",
+            capacity_liters=30000.0,
+            current_liters=0.0,
+        )
+        db.session.add(barrel)
+        db.session.commit()
+        db.session.add(
+            FuelInflow(
+                barrel_id=barrel.id,
+                liters=500,
+                price_per_liter=0.0,
+                total=0.0,
+                date=datetime(2026, 3, 5),
+            )
+        )
+        db.session.add(
+            FuelInflow(
+                barrel_id=barrel.id,
+                liters=300,
+                price_per_liter=0.0,
+                total=0.0,
+                date=datetime(2026, 6, 5),
+            )
+        )
+        db.session.commit()
+
+    data = client.get(
+        "/api/barrel-report?from=2026-06-01&to=2026-06-30"
+    ).get_json()["report"]
+
+    assert data["totals"]["diesel"]["add"] == 300
+    assert data["balance"]["diesel"] == 800
+
+
+def test_barrel_report_without_period_counts_everything(client, app):
+    """Без параметров периода берётся вся история бочки."""
+    from datetime import datetime
+
+    from app import db
+    from app.models import FuelBarrel, FuelInflow
+
+    with app.app_context():
+        _make_user(2)
+        barrel = FuelBarrel(
+            name="Бочка дизель",
+            fuel_type="diesel",
+            capacity_liters=30000.0,
+            current_liters=0.0,
+        )
+        db.session.add(barrel)
+        db.session.commit()
+        db.session.add(
+            FuelInflow(
+                barrel_id=barrel.id,
+                liters=500,
+                price_per_liter=0.0,
+                total=0.0,
+                date=datetime(2026, 3, 5),
+            )
+        )
+        db.session.commit()
+
+    data = client.get("/api/barrel-report").get_json()["report"]
+
+    assert data["totals"]["diesel"]["add"] == 500
+
+
+def test_level_one_cannot_see_barrel_report(client, app):
+    """Водитель отчёт по бочке не получает."""
+    with app.app_context():
+        _make_user(1)
+
+    response = client.get("/api/barrel-report")
+
+    assert response.status_code == 403
+    assert response.get_json()["ok"] is False
+
+
 def test_level_two_cannot_see_reports(client, app):
     """Отчёты доступны только с 3 уровня."""
     from app import db
