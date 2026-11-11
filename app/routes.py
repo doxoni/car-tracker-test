@@ -53,7 +53,7 @@ def health():
     """Health check для Render: проверяет, что процесс жив.
 
     Базу здесь намеренно не трогаем: этот эндпоинт дёргает сам Render
-    (healthCheckPath) и keep-alive раз в 10 минут. На бесплатных
+    (healthCheckPath) и монитор UptimeRobot. На бесплатных
     облачных БД (Neon) запрос к базе будит compute и тратит CU-часы,
     которых в бесплатном тарифе мало. Проверка БД живёт отдельно -
     на /api/health/db.
@@ -64,11 +64,22 @@ def health():
 
     Блок "night" показывает, идёт ли сейчас ночная пауза (02:00-05:00
     по Киеву) и когда она закончится.
+
+    Блок "uptime" показывает состояние монитора UptimeRobot: работает
+    ли пинг днём и стоит ли монитор на паузе ночью.
     """
     from app.bot_runner import bot_state
     from app.night_mode import night_info
+    from app.uptime import state as uptime_state
 
-    return jsonify({"status": "ok", "bot": bot_state(), "night": night_info()})
+    return jsonify(
+        {
+            "status": "ok",
+            "bot": bot_state(),
+            "night": night_info(),
+            "uptime": uptime_state(),
+        }
+    )
 
 
 @bp.get("/health/db")

@@ -236,18 +236,48 @@ def sync_monitor(
 _worker_thread = None
 _worker_lock = threading.Lock()
 
+# Состояние для /api/health: логи Render через API не читаются,
+# поэтому состояние монитора видно только здесь.
+STATE = {
+    "enabled": False,
+    "status": "disabled",
+    "monitor_status": "",
+    "last_action": "",
+    "updated_at": "",
+    "error": "",
+}
+
+
+def state() -> dict:
+    """Состояние монитора для /api/health."""
+    return dict(STATE)
+
 
 def _worker_loop(client: UptimeClient, url: str, interval: int) -> None:
     """Следить за состоянием монитора, пока жив контейнер."""
+    from datetime import datetime
+
     while True:
+        action = "missing"
         try:
             active = desired_active()
-            action = sync_monitor(client, active, url)
-            if action in ("started", "paused"):
-                state = "включён" if active else "на паузе"
-                print(f"⏱ UptimeRobot: монитор {state}", flush=True)
+            monitor = client.find_monitor(url=url)
+            if monitor:
+                STATE["monitor_status"] = monitor.get("status") or ""
+                action = sync_monitor(client, active, url)
+                STATE["status"] = "active" if active else "paused"
+                if action in ("started", "paused"):
+                    state_text = "включён" if active else "на паузе"
+                    print(f"⏱ UptimeRobot: монитор {state_text}", flush=True)
+            else:
+                STATE["status"] = "missing"
+            STATE["last_action"] = action
+            STATE["error"] = ""
         except Exception as exc:  # noqa: BLE001 - поток не должен умирать
+            STATE["status"] = "error"
+            STATE["error"] = f"{type(exc).__name__}: {exc}"[:200]
             print(f"⚠️ UptimeRobot: {exc}", flush=True)
+        STATE["updated_at"] = datetime.now().isoformat(timespec="seconds")
         time.sleep(interval)
 
 
@@ -276,6 +306,8 @@ def start_worker(
             name="uptime-monitor",
             daemon=True,
         )
+        STATE["enabled"] = True
+        STATE["status"] = "starting"
         _worker_thread.start()
     return True
 

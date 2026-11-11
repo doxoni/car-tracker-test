@@ -54,6 +54,15 @@ def test_health_contains_night_block(client):
     assert night["next_change"]
 
 
+def test_health_contains_uptime_block(client):
+    """/api/health показывает состояние монитора UptimeRobot."""
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    uptime = response.get_json()["uptime"]
+    assert "status" in uptime
+    assert "enabled" in uptime
+
+
 def test_is_night_inside_window():
     """Внутри окна 02:00-05:00 по Киеву - ночь."""
     from datetime import datetime
