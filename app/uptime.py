@@ -72,36 +72,52 @@ class UptimeClient:
         self.timeout = timeout
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
-        """Один запрос к API. Ошибки превращаются в UptimeError."""
+        """Один запрос к API. Ошибки превращаются в UptimeError.
+
+        На бесплатном тарифе - 10 запросов в минуту. Если сервер отвечает
+        "Too many requests", ждём и повторяем попытку.
+        """
         url = f"{self.base_url}{path}"
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        request = urllib.request.Request(url, data=data, method=method)
-        request.add_header("Authorization", f"Bearer {self.api_key}")
-        request.add_header("Accept", "application/json")
-        if data is not None:
-            request.add_header("Content-Type", "application/json")
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = response.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", "replace")[:300]
-            raise UptimeError(f"{method} {path} -> {error.code}: {detail}") from error
-        except Exception as error:  # noqa: BLE001 - сеть может отвалиться
-            raise UptimeError(
-                f"{method} {path} -> {type(error).__name__}: {error}"
-            ) from error
+        for attempt in range(3):
+            request = urllib.request.Request(url, data=data, method=method)
+            request.add_header("Authorization", f"Bearer {self.api_key}")
+            request.add_header("Accept", "application/json")
+            if data is not None:
+                request.add_header("Content-Type", "application/json")
 
-        if not payload.strip():
-            return {}
-        try:
-            return json.loads(payload)
-        except ValueError as error:
-            raise UptimeError(f"{method} {path} -> ответ не в JSON") from error
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = response.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", "replace")[:300]
+                if error.code == 429 and attempt < 2:
+                    # Слишком много запросов - ждём и повторяем.
+                    time.sleep(10)
+                    continue
+                raise UptimeError(f"{method} {path} -> {error.code}: {detail}") from error
+            except Exception as error:  # noqa: BLE001 - сеть может отвалиться
+                raise UptimeError(
+                    f"{method} {path} -> {type(error).__name__}: {error}"
+                ) from error
+
+            if not payload.strip():
+                return {}
+            try:
+                return json.loads(payload)
+            except ValueError as error:
+                raise UptimeError(f"{method} {path} -> ответ не в JSON") from error
+
+        raise UptimeError(f"{method} {path} -> слишком много запросов")
 
     def list_monitors(self) -> list[dict]:
-        """Все мониторы аккаунта."""
-        data = self._request("GET", "/monitors?limit=200")
+        """Все мониторы аккаунта.
+
+        limit больше 50 API не принимает: с limit=200 приходит пустой
+        список, поэтому берём 50.
+        """
+        data = self._request("GET", "/monitors?limit=50")
         monitors = data.get("data")
         if monitors is None:
             monitors = data.get("result") or []
@@ -205,6 +221,24 @@ def monitor_url() -> str:
     return (os.getenv("UPTIME_MONITOR_URL") or DEFAULT_MONITOR_URL).strip()
 
 
+def apply_state(client: UptimeClient, monitor: dict, active: bool) -> str:
+    """Привести уже найденный монитор в нужное состояние.
+
+    Возвращает: 'started' (сняли с паузы), 'paused' (поставили на паузу),
+    'unchanged' (уже в нужном состоянии).
+    """
+    paused = client.monitor_state(monitor) == "paused"
+    monitor_id = monitor.get("id")
+
+    if active and paused:
+        client.start_monitor(monitor_id)
+        return "started"
+    if not active and not paused:
+        client.pause_monitor(monitor_id)
+        return "paused"
+    return "unchanged"
+
+
 def sync_monitor(
     client: UptimeClient,
     active: bool,
@@ -218,17 +252,7 @@ def sync_monitor(
     monitor = client.find_monitor(url=url or monitor_url())
     if not monitor:
         return "missing"
-
-    paused = client.monitor_state(monitor) == "paused"
-    monitor_id = monitor.get("id")
-
-    if active and paused:
-        client.start_monitor(monitor_id)
-        return "started"
-    if not active and not paused:
-        client.pause_monitor(monitor_id)
-        return "paused"
-    return "unchanged"
+    return apply_state(client, monitor, active)
 
 
 # ---------- Фоновый поток в контейнере ----------
@@ -264,7 +288,7 @@ def _worker_loop(client: UptimeClient, url: str, interval: int) -> None:
             monitor = client.find_monitor(url=url)
             if monitor:
                 STATE["monitor_status"] = monitor.get("status") or ""
-                action = sync_monitor(client, active, url)
+                action = apply_state(client, monitor, active)
                 STATE["status"] = "active" if active else "paused"
                 if action in ("started", "paused"):
                     state_text = "включён" if active else "на паузе"

@@ -100,6 +100,35 @@ def test_list_monitors_reads_data(monkeypatch):
     assert monitors[0]["id"] == 1
 
 
+def test_list_monitors_asks_for_50(monkeypatch):
+    """Больше 50 мониторов API не отдаёт - с limit=200 список пустой."""
+    calls = _patch_urlopen(monkeypatch, lambda request: _Response({"data": []}))
+
+    UptimeClient("key").list_monitors()
+
+    assert "limit=50" in calls[0].full_url
+
+
+def test_client_repeats_after_rate_limit(monkeypatch):
+    """Ответ "слишком много запросов" - ждём и повторяем."""
+    import urllib.error
+
+    attempts = []
+
+    def _handler(request):
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise urllib.error.HTTPError("url", 429, "too many requests", {}, None)
+        return _Response({"data": []})
+
+    _patch_urlopen(monkeypatch, _handler)
+    monkeypatch.setattr(uptime.time, "sleep", lambda seconds: None)
+
+    UptimeClient("key").list_monitors()
+
+    assert len(attempts) == 2
+
+
 def test_create_monitor_sends_http_type(monkeypatch):
     """Монитор создаётся как HTTP с интервалом 5 минут."""
     calls = _patch_urlopen(monkeypatch, lambda request: _Response({"id": 7}))
@@ -192,6 +221,19 @@ def test_sync_without_monitor_reports_missing():
     client = _FakeClient(None)
 
     assert uptime.sync_monitor(client, True, "https://example.com") == "missing"
+
+
+def test_apply_state_uses_already_found_monitor():
+    """Найденный монитор обрабатываем без повторного запроса списка."""
+    client = _FakeClient({"id": 9, "status": "UP"})
+    calls = []
+    client.find_monitor = lambda url=None, name=None: calls.append(1)
+
+    action = uptime.apply_state(client, {"id": 9, "status": "UP"}, False)
+
+    assert action == "paused"
+    assert client.paused == [9]
+    assert calls == []
 
 
 # ---------- Фоновый поток ----------
