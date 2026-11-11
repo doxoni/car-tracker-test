@@ -924,6 +924,38 @@ def test_pending_list_is_hidden_from_driver(client, app):
     assert response.get_json()["ok"] is False
 
 
+def test_level_two_sees_pending_list_but_cannot_approve(client, app):
+    """Оператор видит уведомления, но принять запись не может."""
+    from app import db
+    from app.models import ServiceEntry
+
+    vehicle_id = _add_vehicle(app)
+    with app.app_context():
+        user = _make_user(1)
+        service = ServiceEntry(
+            vehicle_id=vehicle_id,
+            amount=1000,
+            description="ремонт",
+            status="pending",
+            submitted_by=user.id,
+        )
+        db.session.add(service)
+        db.session.commit()
+        service_id = service.id
+        _make_user(2)
+
+    listing = client.get("/api/review/pending")
+    assert listing.status_code == 200
+    assert len(listing.get_json()["items"]) == 1
+
+    approve = client.post(
+        "/api/cars/%d/services/%d/approve" % (vehicle_id, service_id)
+    )
+    assert approve.status_code == 403
+    with app.app_context():
+        assert ServiceEntry.query.get(service_id).status == "pending"
+
+
 def test_level_one_can_delete_own_pending_service(client, app):
     """Свою запись, пока она на проверке, водитель удалить может."""
     from app import db

@@ -160,6 +160,63 @@
   #btn-costs .costs-amount {
     font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+
+  /* ---------- колокольчик уведомлений ---------- */
+  .top-row #btn-review {
+    flex: 0 0 auto; position: relative; width: auto; min-width: 0; margin: 0;
+    min-height: 36px; padding: 6px 12px; font-size: 18px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .top-row #btn-review::after { content: ""; position: absolute; inset: -4px; }
+  .bell-ico { display: inline-block; line-height: 1; }
+  /* Когда есть записи на проверке - колокольчик покачивается. */
+  .top-row #btn-review.ring .bell-ico {
+    animation: bellRing 1.6s ease-in-out infinite;
+    transform-origin: 50% 15%;
+  }
+  @keyframes bellRing {
+    0%, 60%, 100% { transform: rotate(0deg); }
+    10% { transform: rotate(14deg); }
+    20% { transform: rotate(-12deg); }
+    30% { transform: rotate(9deg); }
+    40% { transform: rotate(-7deg); }
+    50% { transform: rotate(4deg); }
+  }
+  /* Счётчик записей на проверке. */
+  .bell-badge {
+    position: absolute; top: -6px; right: -6px;
+    min-width: 20px; height: 20px; padding: 0 5px;
+    border-radius: 10px; background: #e53935; color: #ffffff;
+    font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
+  }
+
+  /* ---------- вкладки экрана «Затраты» ---------- */
+  .tabs {
+    display: flex; gap: 6px; margin: 0 0 12px;
+    background: var(--chip); border-radius: 12px; padding: 4px;
+  }
+  .tab {
+    flex: 1 1 0; min-height: 40px; border: 0; border-radius: 9px;
+    background: transparent; color: var(--hint);
+    font-size: 15px; font-weight: 600;
+    transition: background .2s ease, color .2s ease;
+  }
+  .tab.on {
+    background: var(--card); color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  /* Панель вкладки: плавное появление со сдвигом. */
+  .tab-panel { display: none; }
+  .tab-panel.on { display: block; animation: tabIn .28s ease both; }
+  @keyframes tabIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  /* Блок бочки внутри вкладки «Затраты». */
+  .barrel-report-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .barrel-report-item:last-child { border-bottom: 0; }
+
   .back {
     display: inline-flex; align-items: center; gap: 6px;
     width: auto; min-height: 44px; padding: 6px 8px 6px 0; margin: 0 0 6px;
@@ -707,6 +764,11 @@
     <button class="btn-secondary hidden" id="btn-costs" onclick="showCosts()">
       <span>Затраты</span><span class="costs-amount" id="costs-amount"></span>
     </button>
+    <button class="btn-secondary hidden" id="btn-review" type="button"
+            onclick="showReview()" aria-label="Записи на проверке">
+      <span class="bell-ico">🔔</span>
+      <span class="bell-badge hidden" id="review-badge">0</span>
+    </button>
     <button class="btn-secondary" id="btn-lang" type="button">🇷🇺 Русский</button>
   </div>
   <div id="barrel-box"></div>
@@ -721,7 +783,6 @@
   <div id="cars-list" role="status" aria-live="polite"></div>
   <button class="btn-secondary" id="btn-main-1" onclick="showAddCar()">➕ Добавить автомобиль</button>
   <button class="btn-secondary" id="btn-main-2" onclick="showReport()">📊 Отчёт</button>
-  <button class="btn-secondary hidden" id="btn-review" onclick="showReview()">✅ На проверке</button>
 </div>
 
 <div id="screen-car" class="hidden">
@@ -870,8 +931,6 @@
   <button class="back" onclick="backToCars()">← Назад к списку</button>
   <h1>📊 Отчёт по машинам</h1>
   <div class="card" id="report-summary"></div>
-  <h2>Бочка</h2>
-  <div class="card" id="report-barrel"></div>
   <div class="barrel-bottom">
     <button class="btn-secondary" onclick="downloadReportText()">⬇️ Скачать отчёт (текст)</button>
     <button class="btn-secondary" onclick="refreshReport()">🔄 Обновить</button>
@@ -880,15 +939,63 @@
 
 <div id="screen-costs" class="hidden">
   <button class="back" onclick="backToCars()">← Назад к списку</button>
-  <h1>💸 Затраты за месяц</h1>
-  <div class="card" id="costs-summary"></div>
-  <h2>По машинам</h2>
-  <div class="card" id="costs-cars"></div>
+  <h1>💸 Затраты</h1>
+  <div class="filters-bar">
+    <div class="filter-row">
+      <label class="filter-label" for="costs-from-view">Период</label>
+      <div class="filter-period">
+        <div class="filter-date">
+          <div class="datefield" id="costs-from-field">
+            <input type="hidden" id="costs-from">
+            <input type="text" id="costs-from-view" readonly autocomplete="off" role="combobox"
+              aria-haspopup="dialog" aria-expanded="false" placeholder="с какого числа">
+            <button type="button" class="datefield-btn" tabindex="-1" aria-label="Открыть календарь">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>
+              <path d="M3 10h18M8 3v4M16 3v4"/></svg></button>
+          </div>
+          <div class="cal" id="costs-from-cal" role="dialog" aria-label="Календарь"></div>
+        </div>
+        <span class="filter-dash">—</span>
+        <div class="filter-date">
+          <div class="datefield" id="costs-to-field">
+            <input type="hidden" id="costs-to">
+            <input type="text" id="costs-to-view" readonly autocomplete="off" role="combobox"
+              aria-haspopup="dialog" aria-expanded="false" placeholder="по какое число">
+            <button type="button" class="datefield-btn" tabindex="-1" aria-label="Открыть календарь">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/>
+              <path d="M3 10h18M8 3v4M16 3v4"/></svg></button>
+          </div>
+          <div class="cal" id="costs-to-cal" role="dialog" aria-label="Календарь"></div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-row period-chips">
+      <button type="button" class="period-chip costs-chip" data-days="7" onclick="setCostsPeriod(7)">Неделя</button>
+      <button type="button" class="period-chip costs-chip" data-days="30" onclick="setCostsPeriod(30)">Месяц</button>
+      <button type="button" class="period-chip costs-chip" data-days="0" onclick="setCostsPeriod(0)">Всё время</button>
+    </div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab on" id="tab-costs" role="tab"
+            onclick="switchCostsTab('costs')">Затраты</button>
+    <button type="button" class="tab" id="tab-barrel" role="tab"
+            onclick="switchCostsTab('barrel')">Бочка</button>
+  </div>
+  <div class="tab-panel on" id="panel-costs">
+    <div class="card" id="costs-summary"></div>
+    <h2>По машинам</h2>
+    <div class="card" id="costs-cars"></div>
+  </div>
+  <div class="tab-panel" id="panel-barrel">
+    <div class="card" id="costs-barrel"></div>
+  </div>
 </div>
 
 <div id="screen-review" class="hidden">
   <button class="back" onclick="backToCars()">← Назад к списку</button>
-  <h1>✅ На проверке</h1>
+  <h1>🔔 На проверке</h1>
   <div class="card" id="review-body"></div>
 </div>
 
@@ -939,9 +1046,9 @@
       </select>
     </div>
     <div class="filter-row period-chips">
-      <button type="button" class="period-chip" data-days="7" onclick="setReportPeriod(7)">Неделя</button>
-      <button type="button" class="period-chip" data-days="30" onclick="setReportPeriod(30)">Месяц</button>
-      <button type="button" class="period-chip" data-days="0" onclick="setReportPeriod(0)">Всё время</button>
+      <button type="button" class="period-chip reports-chip" data-days="7" onclick="setReportPeriod(7)">Неделя</button>
+      <button type="button" class="period-chip reports-chip" data-days="30" onclick="setReportPeriod(30)">Месяц</button>
+      <button type="button" class="period-chip reports-chip" data-days="0" onclick="setReportPeriod(0)">Всё время</button>
     </div>
     <label class="show-paid-row"><span class="paid-check"><input type="checkbox" id="filter-show-paid"></span>Показать оплаченные</label>
   </div>
@@ -1714,6 +1821,8 @@ function loadCars() {
     loadBarrelMenu();
     // Сумма затрат за месяц рядом с кнопкой «Затраты».
     if (!searchQuery && userLevel >= 2) loadCostsAmount();
+    // Число записей на проверке на колокольчике.
+    if (!searchQuery) loadReviewBadge();
     if (!data.cars.length) {
       if (searchQuery) {
         box.innerHTML = emptyHtml("🔍", "Ничего не нашлось",
@@ -2110,7 +2219,6 @@ function renderReport() {
   const data = reportData;
   const box = document.getElementById("report-summary");
   const totals = (data && data.report && data.report.totals) || {};
-  const barrelTotals = (data && data.report && data.report.barrel_totals) || {};
 
   if (!data || !data.ok) {
     box.innerHTML = errorHtml("Не удалось загрузить", "нет данных", "refreshReport()");
@@ -2126,40 +2234,16 @@ function renderReport() {
   html += '<div class="stat"><div class="stat-label">Обслуживание</div><div class="stat-value small">' + money(totals.service_total || 0) + '</div></div>';
   html += '<div class="stat"><div class="stat-label">Всего расходов</div><div class="stat-value small">' + money((totals.total_expenses || 0) + (totals.service_total || 0)) + '</div></div>';
   box.innerHTML = html;
-
-  // Бочка
-  const barrelBox = document.getElementById("report-barrel");
-  let barrelHtml = "";
-  const BARREL_TYPE_NAME = { diesel: "Дизель", petrol: "Бензин" };
-  const BARREL_ACTION_NAME = { add: "Пополнение", fill: "Заправка", sub: "Убавление" };
-  Object.keys(barrelTotals).forEach(function (type) {
-    Object.keys(barrelTotals[type]).forEach(function (action) {
-      const total = barrelTotals[type][action] || 0;
-      barrelHtml += '<div class="item">';
-      barrelHtml += '<div class="item-top">';
-      barrelHtml += '<span class="item-title">' + esc((BARREL_TYPE_NAME[type] || type) + ": " + (BARREL_ACTION_NAME[action] || action)) + '</span>';
-      barrelHtml += '<span class="item-sum">' + litersText(total) + ' л</span>';
-      barrelHtml += '</div>';
-      barrelHtml += '</div>';
-    });
-  });
-  barrelBox.innerHTML = barrelHtml;
 }
 
-// ---------- затраты за месяц ----------
+// ---------- затраты: период, вкладки «Затраты» и «Бочка» ----------
 
-let costsData = null;          // последние загруженные итоги месяца
-
-const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
-
-// Название месяца по ключу «ГГГГ-ММ».
-function monthName(monthKey) {
-  const parts = String(monthKey || "").split("-");
-  const index = Number(parts[1]) - 1;
-  if (index < 0 || index > 11) return monthKey || "";
-  return tr(MONTH_NAMES[index]) + " " + (parts[0] || "");
-}
+let costsData = null;          // последние загруженные итоги за выбранный период
+let costsButtonData = null;    // итоги за текущий месяц (сумма на кнопке)
+let costsBarrelData = null;    // последний загруженный отчёт по бочке
+let costsTab = "costs";        // активная вкладка: "costs" или "barrel"
+let costsFromField = null;     // календарь «с какого числа»
+let costsToField = null;       // календарь «по какое число»
 
 // Верхние кнопки главного экрана: «Отчёт» — с 3 уровня, «Затраты» — со 2-го.
 function renderTopButtons() {
@@ -2167,44 +2251,183 @@ function renderTopButtons() {
   if (reportBtn) reportBtn.classList.toggle("hidden", userLevel < 3);
   const costsBtn = document.getElementById("btn-costs");
   if (costsBtn) costsBtn.classList.toggle("hidden", userLevel < 2);
-  // «На проверке» — третьему уровню: он принимает и отклоняет записи.
+  // Колокольчик уведомлений — со 2-го уровня: там видно, что ждёт проверки.
+  // Принимать и отклонять записи может только третий уровень.
   const reviewBtn = document.getElementById("btn-review");
-  if (reviewBtn) reviewBtn.classList.toggle("hidden", userLevel < 3);
+  if (reviewBtn) reviewBtn.classList.toggle("hidden", userLevel < 2);
 }
 
-// Сумма за месяц рядом с кнопкой «Затраты».
+// ---------- уведомления: счётчик на колокольчике ----------
+
+// Показать число записей, ждущих проверки, на колокольчике.
+function renderReviewBadge(count) {
+  const badge = document.getElementById("review-badge");
+  const btn = document.getElementById("btn-review");
+  if (!badge || !btn) return;
+  const total = Number(count || 0);
+  badge.textContent = total > 99 ? "99+" : String(total);
+  badge.classList.toggle("hidden", total <= 0);
+  btn.classList.toggle("ring", total > 0);
+  btn.setAttribute("aria-label", "Записи на проверке: " + total);
+}
+
+// Загрузить число записей на проверке (видно со 2-го уровня).
+function loadReviewBadge() {
+  if (userLevel < 2) {
+    renderReviewBadge(0);
+    return;
+  }
+  api("/api/review/pending").then(function (data) {
+    renderReviewBadge((data.items || []).length);
+  }).catch(function () {
+    renderReviewBadge(0);
+  });
+}
+
+// ---------- период затрат ----------
+
+// Строка запроса с выбранным периодом. Пустая дата - границы нет.
+function costsPeriodQuery() {
+  const from = document.getElementById("costs-from").value || "";
+  const to = document.getElementById("costs-to").value || "";
+  return "?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+}
+
+// Подпись выбранного периода: «с 01.03.2026 по 31.03.2026» или «всё время».
+function costsPeriodText() {
+  const from = document.getElementById("costs-from").value || "";
+  const to = document.getElementById("costs-to").value || "";
+  if (!from && !to) return tr("Всё время");
+  const fmt = function (iso) {
+    const parts = String(iso).split("-");
+    if (parts.length !== 3) return iso;
+    return parts[2] + "." + parts[1] + "." + parts[0];
+  };
+  if (from && to) return fmt(from) + " — " + fmt(to);
+  if (from) return fmt(from);
+  return fmt(to);
+}
+
+// Быстрый выбор периода: 7 - неделя, 30 - месяц, 0 - всё время.
+function setCostsPeriod(days) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let fromIso = "";
+  let toIso = "";
+  if (days > 0) {
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
+    fromIso = localDateStr(from);
+    toIso = localDateStr(today);
+  }
+  if (costsFromField) costsFromField.set(fromIso, true);
+  if (costsToField) costsToField.set(toIso, true);
+  markCostsChips();
+  reloadCosts();
+}
+
+// Пользователь выбрал дату в календаре: если границы перепутаны - меняем их местами.
+function onCostsPeriodChange() {
+  const fromVal = document.getElementById("costs-from").value || "";
+  const toVal = document.getElementById("costs-to").value || "";
+  const fromTime = periodStart(fromVal);
+  const toTime = periodStart(toVal);
+  if (fromTime !== null && toTime !== null && fromTime > toTime) {
+    if (costsFromField) costsFromField.set(toVal, true);
+    if (costsToField) costsToField.set(fromVal, true);
+  }
+  markCostsChips();
+  reloadCosts();
+}
+
+// Подсветить быстрый выбор, если текущий период ему соответствует.
+function markCostsChips() {
+  const fromVal = document.getElementById("costs-from").value || "";
+  const toVal = document.getElementById("costs-to").value || "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = localDateStr(today);
+  let activeDays = 0;
+  if (toVal === todayIso && fromVal) {
+    activeDays = Math.round((today.getTime() - periodStart(fromVal)) / (24 * 60 * 60 * 1000)) + 1;
+  }
+  if (!fromVal && !toVal) activeDays = 0;
+  const chips = document.querySelectorAll(".costs-chip");
+  for (let i = 0; i < chips.length; i++) {
+    const days = parseInt(chips[i].dataset.days, 10);
+    const on = days === 0 ? (!fromVal && !toVal) : (days === activeDays);
+    chips[i].classList.toggle("on", on);
+  }
+}
+
+// При первом открытии экрана показываем текущий месяц.
+function initCostsPeriod() {
+  if (costsFromField) return;
+  // permanent - поля живут всё время: их нельзя чистить при смене форм.
+  costsFromField = initDateField("costs-from", onCostsPeriodChange, true);
+  costsToField = initDateField("costs-to", onCostsPeriodChange, true);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const first = new Date(today.getFullYear(), today.getMonth(), 1);
+  if (costsFromField) costsFromField.set(localDateStr(first), true);
+  if (costsToField) costsToField.set(localDateStr(today), true);
+  markCostsChips();
+}
+
+// Сумма за период рядом с кнопкой «Затраты».
 function renderCostsAmount() {
   const box = document.getElementById("costs-amount");
   if (!box) return;
-  if (!costsData) {
+  if (!costsButtonData) {
     box.textContent = "";
     return;
   }
-  box.textContent = money((costsData.totals || {}).total || 0);
+  box.textContent = money((costsButtonData.totals || {}).total || 0);
 }
 
-// Подгружаем итоги месяца для кнопки на главном экране.
+// Подгружаем итоги за месяц для кнопки на главном экране.
+// Сумма на кнопке всегда за текущий месяц, независимо от периода
+// на экране «Затраты».
 function loadCostsAmount() {
   api("/api/month-costs").then(function (data) {
-    costsData = data.costs || null;
+    costsButtonData = data.costs || null;
     renderCostsAmount();
   }).catch(function () {
     // Кнопка останется без суммы — экран затрат покажет ошибку.
   });
 }
 
-// Открываем экран «Затраты»: итоги месяца и разбивка по машинам.
+// Открываем экран «Затраты»: итоги за период и разбивка по машинам.
 function showCosts() {
   show("screen-costs");
+  initCostsPeriod();
   loadCosts();
+}
+
+// Перезагрузить данные активной вкладки.
+function reloadCosts() {
+  if (costsTab === "barrel") loadBarrelReport();
+  else loadCosts();
+}
+
+// Переключение вкладок «Затраты» / «Бочка».
+function switchCostsTab(tab) {
+  costsTab = tab === "barrel" ? "barrel" : "costs";
+  const costsTabBtn = document.getElementById("tab-costs");
+  const barrelTabBtn = document.getElementById("tab-barrel");
+  const costsPanel = document.getElementById("panel-costs");
+  const barrelPanel = document.getElementById("panel-barrel");
+  if (costsTabBtn) costsTabBtn.classList.toggle("on", costsTab === "costs");
+  if (barrelTabBtn) barrelTabBtn.classList.toggle("on", costsTab === "barrel");
+  if (costsPanel) costsPanel.classList.toggle("on", costsTab === "costs");
+  if (barrelPanel) barrelPanel.classList.toggle("on", costsTab === "barrel");
+  reloadCosts();
 }
 
 function loadCosts() {
   const summary = document.getElementById("costs-summary");
   summary.innerHTML = loadingHtml("Считаю затраты…");
-  api("/api/month-costs").then(function (data) {
+  api("/api/month-costs" + costsPeriodQuery()).then(function (data) {
     costsData = data.costs || null;
-    renderCostsAmount();
     renderCosts();
   }).catch(function (error) {
     summary.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadCosts()");
@@ -2216,7 +2439,7 @@ function renderCosts() {
   const totals = costs.totals || {};
   const cars = costs.cars || [];
 
-  let html = '<div class="hint">' + esc(monthName(costs.month)) + '</div>';
+  let html = '<div class="hint">' + esc(costsPeriodText()) + '</div>';
   html += '<div class="stats">';
   html += '<div class="stat"><div class="stat-label">Расходы</div><div class="stat-value small">' + money(totals.expenses || 0) + '</div></div>';
   html += '<div class="stat"><div class="stat-label">Заправки</div><div class="stat-value small">' + money(totals.fuel || 0) + '</div></div>';
@@ -2227,7 +2450,7 @@ function renderCosts() {
 
   const box = document.getElementById("costs-cars");
   if (!cars.length) {
-    box.innerHTML = emptyHtml("💸", "Пока пусто", "В этом месяце затрат ещё не было");
+    box.innerHTML = emptyHtml("💸", "Пока пусто", "За этот период затрат не было");
     return;
   }
   let list = "";
@@ -2243,6 +2466,58 @@ function renderCosts() {
     list += '</div>';
   });
   box.innerHTML = list;
+}
+
+// ---------- бочка: отчёт за период ----------
+
+const BARREL_TYPE_NAME = { diesel: "Дизель", petrol: "Бензин" };
+const BARREL_ACTION_NAME = { add: "Пополнение", fill: "Заправка", sub: "Убавление" };
+
+function loadBarrelReport() {
+  const box = document.getElementById("costs-barrel");
+  box.innerHTML = loadingHtml("Считаю бочку…");
+  api("/api/barrel-report" + costsPeriodQuery()).then(function (data) {
+    costsBarrelData = data.report || null;
+    renderBarrelReport();
+  }).catch(function (error) {
+    box.innerHTML = errorHtml("Не удалось загрузить", error.message, "loadBarrelReport()");
+  });
+}
+
+function renderBarrelReport() {
+  const report = costsBarrelData || {};
+  const totals = report.totals || {};
+  const balance = report.balance || {};
+  const box = document.getElementById("costs-barrel");
+
+  let html = '<div class="hint">' + esc(costsPeriodText()) + '</div>';
+  html += '<div class="stats">';
+  html += '<div class="stat"><div class="stat-label">Дизель в бочке</div><div class="stat-value small">' +
+    litersText(balance.diesel || 0) + ' ' + tr("л") + '</div></div>';
+  html += '<div class="stat"><div class="stat-label">Бензин в бочке</div><div class="stat-value small">' +
+    litersText(balance.petrol || 0) + ' ' + tr("л") + '</div></div>';
+  html += '</div>';
+  box.innerHTML = html;
+
+  let list = "";
+  Object.keys(totals).forEach(function (type) {
+    Object.keys(totals[type]).forEach(function (action) {
+      const total = Number(totals[type][action] || 0);
+      if (!total) return;
+      list += '<div class="barrel-report-item">';
+      list += '<div class="item-top">';
+      list += '<span class="item-title">' +
+        esc((BARREL_TYPE_NAME[type] || type) + ": " + (BARREL_ACTION_NAME[action] || action)) + '</span>';
+      list += '<span class="item-sum">' + litersText(total) + ' ' + tr("л") + '</span>';
+      list += '</div>';
+      list += '</div>';
+    });
+  });
+  if (!list) {
+    box.innerHTML += emptyHtml("🛢", "Пока пусто", "За этот период операций с бочкой не было");
+  } else {
+    box.innerHTML += list;
+  }
 }
 
 // ---------- огляд ----------
@@ -3226,7 +3501,7 @@ function markPeriodChips() {
     activeDays = days;
   }
   if (!fromVal && !toVal) activeDays = 0;
-  const chips = document.querySelectorAll(".period-chip");
+  const chips = document.querySelectorAll(".reports-chip");
   for (let i = 0; i < chips.length; i++) {
     const days = parseInt(chips[i].dataset.days, 10);
     const on = days === 0 ? (!fromVal && !toVal) : (days === activeDays);
@@ -3735,6 +4010,7 @@ function sendReview(kind, vehicleId, id, approved) {
     toast(data.message || (approved ? "Запись принята" : "Запись отклонена"));
     if (historyRequest) loadHistory(historyRequest.path, historyRequest.key, historyRequest.render);
     if (!document.getElementById("screen-review").classList.contains("hidden")) loadReview();
+    else loadReviewBadge();
   }).catch(function (error) {
     toast("Не удалось: " + error.message);
   });
@@ -3752,11 +4028,16 @@ function loadReview() {
   body.innerHTML = loadingHtml("Загружаю…");
   api("/api/review/pending").then(function (data) {
     const items = data.items || [];
+    renderReviewBadge(items.length);
     if (!items.length) {
       body.innerHTML = emptyHtml("✅", "Проверять нечего", "Все записи подтверждены");
       return;
     }
     let html = '<div class="hist-list" id="review-list"></div>';
+    if (userLevel < 3) {
+      // Второй уровень видит уведомления, но решает только третий.
+      html += '<div class="hint">Принять или отклонить запись может только 3 уровень.</div>';
+    }
     body.innerHTML = html;
     const list = document.getElementById("review-list");
     items.forEach(function (item) {
