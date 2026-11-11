@@ -70,6 +70,10 @@ class UptimeClient:
         self.api_key = (api_key or "").strip()
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # ID найденного монитора запоминаем: список мониторов отдаёт
+        # в поле status результат последней проверки, а не признак паузы.
+        # Честный статус (PAUSED) даёт только запрос по id.
+        self._monitor_id = None
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         """Один запрос к API. Ошибки превращаются в UptimeError.
@@ -123,15 +127,36 @@ class UptimeClient:
             monitors = data.get("result") or []
         return list(monitors)
 
+    def get_monitor(self, monitor_id) -> dict:
+        """Монитор по id.
+
+        Только здесь виден честный статус: у остановленного монитора
+        status = PAUSED, а в списке мониторов остаётся результат последней
+        проверки (UP/DOWN).
+        """
+        return self._request("GET", f"/monitors/{monitor_id}")
+
     def find_monitor(
         self, url: str | None = None, name: str | None = None
     ) -> dict | None:
         """Найти монитор по адресу или по имени. None - если не найден."""
+        if self._monitor_id is not None:
+            try:
+                monitor = self.get_monitor(self._monitor_id)
+            except UptimeError:
+                monitor = None
+            if monitor and (url is None or monitor.get("url") == url):
+                return monitor
+            if monitor and name and monitor.get("friendlyName") == name:
+                return monitor
+
         for monitor in self.list_monitors():
             if url and monitor.get("url") == url:
-                return monitor
+                self._monitor_id = monitor.get("id")
+                return self.get_monitor(self._monitor_id)
             if name and monitor.get("friendlyName") == name:
-                return monitor
+                self._monitor_id = monitor.get("id")
+                return self.get_monitor(self._monitor_id)
         return None
 
     def create_monitor(
@@ -151,7 +176,9 @@ class UptimeClient:
             # Несколько минут на то, чтобы сервис проснулся после сна.
             "gracePeriod": 300,
         }
-        return self._request("POST", "/monitors", body)
+        monitor = self._request("POST", "/monitors", body)
+        self._monitor_id = monitor.get("id")
+        return monitor
 
     def pause_monitor(self, monitor_id) -> dict:
         """Поставить монитор на паузу (идемпотентно)."""

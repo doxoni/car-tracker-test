@@ -129,6 +129,48 @@ def test_client_repeats_after_rate_limit(monkeypatch):
     assert len(attempts) == 2
 
 
+def test_find_monitor_takes_status_from_by_id(monkeypatch):
+    """В списке статус - это результат проверки (UP), а пауза видна по id."""
+    urls = []
+
+    def _handler(request):
+        urls.append(request.full_url)
+        if "/monitors/1" in request.full_url:
+            return _Response({"id": 1, "url": "https://example.com", "status": "PAUSED"})
+        return _Response(
+            {"data": [{"id": 1, "url": "https://example.com", "status": "UP"}]}
+        )
+
+    _patch_urlopen(monkeypatch, _handler)
+
+    monitor = UptimeClient("key").find_monitor(url="https://example.com")
+
+    assert monitor["status"] == "PAUSED"
+    assert any("/monitors/1" in url for url in urls)
+
+
+def test_find_monitor_remembers_id(monkeypatch):
+    """Найденный монитор запоминаем - список больше не переспрашиваем."""
+    urls = []
+
+    def _handler(request):
+        urls.append(request.full_url)
+        if "/monitors/1" in request.full_url:
+            return _Response({"id": 1, "url": "https://example.com", "status": "UP"})
+        return _Response(
+            {"data": [{"id": 1, "url": "https://example.com", "status": "UP"}]}
+        )
+
+    _patch_urlopen(monkeypatch, _handler)
+    client = UptimeClient("key")
+
+    client.find_monitor(url="https://example.com")
+    list_calls = len([url for url in urls if url.endswith("limit=50")])
+    client.find_monitor(url="https://example.com")
+
+    assert list_calls == 1
+
+
 def test_create_monitor_sends_http_type(monkeypatch):
     """Монитор создаётся как HTTP с интервалом 5 минут."""
     calls = _patch_urlopen(monkeypatch, lambda request: _Response({"id": 7}))
