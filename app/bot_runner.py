@@ -380,6 +380,11 @@ def reset_after_fork():
     # Замок могли удерживать потоки родительского процесса - в дочернем
     # их нет, а сам замок остался в запертом состоянии. Делаем новый.
     _start_lock = threading.Lock()
+    # Поток управления монитором UptimeRobot - тоже переживает только
+    # форк в живом виде, поэтому сбрасываем и его.
+    from app.uptime import reset_after_fork as reset_uptime_after_fork
+
+    reset_uptime_after_fork()
     BOT_STATE.update(
         {
             "status": "not_started",

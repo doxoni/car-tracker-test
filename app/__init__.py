@@ -70,6 +70,12 @@ def _ensure_bot_on_request():
 
     ensure_bot_started("request")
 
+    # Так же поднимаем управление монитором UptimeRobot: без ключа
+    # UPTIME_API_KEY поток просто не стартует.
+    from app.uptime import start_worker
+
+    start_worker()
+
 
 def _register_fork_hook(app):
     """Подготовить дочерний процесс после форка.

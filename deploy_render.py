@@ -158,6 +158,31 @@ def read_render_env() -> dict:
     return {k: v for k, v in values.items() if k in allowed}
 
 
+def read_uptime_key() -> str:
+    """Ключ UptimeRobot API.
+
+    Порядок: переменная окружения, потом файл uptime_key.txt (в
+    .gitignore), потом render_env.txt. Пустая строка - ключа нет.
+    """
+    key = (os.getenv("UPTIME_API_KEY") or "").strip()
+    if key:
+        return key
+
+    key_file = ROOT / "uptime_key.txt"
+    if key_file.exists():
+        key = key_file.read_text(encoding="utf-8-sig").strip()
+        if key:
+            return key
+
+    env_file = ROOT / "render_env.txt"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if line.startswith("UPTIME_API_KEY="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
 def ensure_webhook_secret(values: dict) -> dict:
     """Задать режим бота и секрет вебхука.
 
@@ -490,6 +515,10 @@ def main():
     values.update(extra)
     # Бот в режиме webhook + секрет вебхука.
     values = ensure_webhook_secret(values)
+    # Ключ UptimeRobot: контейнер сам управляет паузой монитора ночью.
+    uptime_key = read_uptime_key()
+    if uptime_key:
+        values["UPTIME_API_KEY"] = uptime_key
     # Адрес вебхука: Telegram шлёт обновления прямо сюда.
     values.setdefault(
         "TELEGRAM_WEBHOOK_URL", "https://car-tracker-test.onrender.com/telegram/webhook"

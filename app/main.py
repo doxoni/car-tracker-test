@@ -22,6 +22,12 @@ application = create_app()
 def main():
     """Запустить веб-сервер (и бота, если он включён)."""
     ensure_bot_started("local")
+
+    # Монитор UptimeRobot: днём пинг, ночью пауза (контейнер спит).
+    from app.uptime import start_worker
+
+    start_worker()
+
     application.run(host="0.0.0.0", port=int(os.getenv("PORT") or 5000))
 
 

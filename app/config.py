@@ -76,6 +76,11 @@ class Config:
     # Адрес вебхука. Если пусто - берётся APP_URL + "/telegram/webhook".
     TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "")
 
+    # UptimeRobot: днём монитор пингует сервис (контейнер не спит),
+    # ночью монитор на паузе (контейнер спит и не тратит часы тарифа).
+    # Настройки читает app/uptime.py прямо из переменных окружения
+    # (UPTIME_API_KEY, UPTIME_START_HOUR, UPTIME_END_HOUR).
+
     # Wialon
     WIALON_TOKEN = os.getenv("WIALON_TOKEN", "")
 

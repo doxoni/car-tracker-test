@@ -26,6 +26,10 @@ services:
       # Адрес вебхука - сообщения Telegram приходят прямо сюда.
       - key: TELEGRAM_WEBHOOK_URL
         value: https://car-tracker-test.onrender.com/telegram/webhook
+      # Ключ UptimeRobot: контейнер сам ставит монитор на паузу ночью и
+      # снимает с паузы днём. Ставится скриптом deploy_render.py.
+      - key: UPTIME_API_KEY
+        sync: false
       # Строка подключения к PostgreSQL.
       # Ставится автоматически скриптом deploy_render.py.
       - key: DATABASE_URL

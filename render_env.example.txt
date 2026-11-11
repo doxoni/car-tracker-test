@@ -6,6 +6,11 @@
 # ADMIN_TELEGRAM_ID - твой Telegram ID (он же станет суперадмином в БД)
 # WHITELISTED_TELEGRAM_IDS - список Telegram ID через запятую, кому открыт доступ
 # APP_URL - заполнять не нужно, deploy_render.py подставит сам
+#
+# UPTIME_API_KEY - ключ UptimeRobot (Integrations -> API -> Create API key).
+# С ним контейнер сам ставит монитор на паузу ночью и включает днём.
+# Можно положить его в файл uptime_key.txt (одна строка) - deploy_render.py
+# возьмёт ключ оттуда.
 
 TELEGRAM_TOKEN=123456789:AAExampleTokenReplaceMe
 ADMIN_TELEGRAM_ID=123456789

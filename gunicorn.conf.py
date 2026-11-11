@@ -23,3 +23,9 @@ def post_worker_init(worker):
     from app.bot_runner import ensure_bot_started
 
     ensure_bot_started("gunicorn")
+
+    # Поток управления монитором UptimeRobot: днём монитор пингует сервис,
+    # ночью - пауза, чтобы контейнер спал и не тратил часы тарифа.
+    from app.uptime import start_worker
+
+    start_worker()
