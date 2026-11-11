@@ -49,6 +49,7 @@ from uptime import (  # noqa: E402 - путь добавили выше
     UptimeError,
     desired_active,
     monitor_url,
+    night_monitor_url,
     sync_all,
     sync_monitor,
 )
@@ -106,7 +107,10 @@ def cmd_setup(client: UptimeClient, args) -> int:
     else:
         print("Основной монитор не удалось создать.")
 
-    night = client.ensure_monitor(NIGHT_MONITOR_NAME, url, NIGHT_CHECK_INTERVAL)
+    night = client.ensure_monitor(
+        NIGHT_MONITOR_NAME, night_monitor_url(), NIGHT_CHECK_INTERVAL
+    )
+
     if night:
         print("")
         print("Дежурный монитор (1 час, работает всегда):")

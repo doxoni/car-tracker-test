@@ -310,8 +310,25 @@ def desired_active(moment: datetime | None = None) -> bool:
 
 
 def monitor_url() -> str:
-    """Адрес, который проверяет монитор."""
+    """Адрес, который проверяет основной монитор."""
     return (os.getenv("UPTIME_MONITOR_URL") or DEFAULT_MONITOR_URL).strip()
+
+
+def night_monitor_url() -> str:
+    """Адрес, который проверяет дежурный монитор.
+
+    UptimeRobot не даёт два монитора на один и тот же URL (ошибка
+    009-011 "Duplicate monitor"), поэтому у дежурного монитора свой
+    адрес - тот же health с добавленным параметром. Сервер параметр
+    игнорирует, отвечает как обычно.
+    """
+    explicit = (os.getenv("UPTIME_NIGHT_MONITOR_URL") or "").strip()
+    if explicit:
+        return explicit
+
+    url = monitor_url()
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}night=1"
 
 
 # ---------- Синхронизация состояния ----------
@@ -371,7 +388,9 @@ def sync_all(
     day = client.ensure_monitor(MONITOR_NAME, url, CHECK_INTERVAL)
     result["day"] = apply_state(client, day, active) if day else "missing"
 
-    night = client.ensure_monitor(NIGHT_MONITOR_NAME, url, NIGHT_CHECK_INTERVAL)
+    night = client.ensure_monitor(
+        NIGHT_MONITOR_NAME, night_monitor_url(), NIGHT_CHECK_INTERVAL
+    )
     result["night"] = apply_state(client, night, True) if night else "missing"
 
     return result

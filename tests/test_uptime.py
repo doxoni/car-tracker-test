@@ -448,6 +448,16 @@ def test_sync_all_creates_missing_monitors():
     assert client.night["interval"] == uptime.NIGHT_CHECK_INTERVAL
 
 
+def test_night_monitor_has_own_url():
+    """UptimeRobot не даёт два монитора на один URL - у дежурного свой."""
+    day_url = uptime.monitor_url()
+    night_url = uptime.night_monitor_url()
+
+    assert night_url != day_url
+    assert night_url.startswith(day_url)
+    assert "night=1" in night_url
+
+
 # ---------- Фоновый поток ----------
 
 
