@@ -12,11 +12,19 @@
       - ночью монитор стоит на паузе - пингов нет, контейнер засыпает сам
         и часы не тратятся.
 
-Кто управляет паузой:
-    Сам контейнер (фоновый поток в app/uptime.py): в 23:00 по Киеву он
-    снимает монитор с паузы... точнее - ставит на паузу, а когда контейнер
-    просыпается днём (по запросу пользователя или по пингу) - включает
-    монитор обратно. Поэтому сервис спит ночью и просыпается по команде.
+Два монитора:
+    - "car-tracker-test" - основной, интервал 5 минут. Днём работает,
+      ночью на паузе.
+    - "car-tracker-test-night" - дежурный, интервал 1 час. Работает всегда.
+      Ночью он раз в час будит контейнер, и тот засыпает снова. Утром
+      (07:00 по Киеву) дежурный поднимает контейнер, контейнер видит, что
+      день, и включает основной монитор - сервис остаётся живым весь день.
+      Схема не зависит от расписания GitHub Actions (оно опаздывает на
+      часы), поэтому утром сервис просыпается сам.
+
+Кто управляет мониторами:
+    Сам контейнер (фоновый поток в app/uptime.py): он сверяет состояние
+    мониторов с нужным каждые 5 минут и сам создаёт их, если их нет.
 
 Ключ API живёт только в переменной окружения UPTIME_API_KEY (на Render) или
 в файле uptime_key.txt (локально, файл в .gitignore). В коде и Git его
@@ -36,15 +44,27 @@ from zoneinfo import ZoneInfo
 
 API_BASE = "https://api.uptimerobot.com/v3"
 DEFAULT_MONITOR_URL = "https://car-tracker-test.onrender.com/api/health"
+
+# Основной монитор: пингует сервис раз в 5 минут днём и держит контейнер
+# awake. Ночью стоит на паузе.
 MONITOR_NAME = "car-tracker-test"
+
+# Дежурный монитор: пингует сервис раз в час и работает всегда. Ночью он
+# раз в час будит контейнер, и тот засыпает снова. Утром (07:00 по Киеву)
+# дежурный поднимает контейнер, контейнер видит, что день, и включает
+# основной монитор - сервис остаётся живым весь день.
+NIGHT_MONITOR_NAME = "car-tracker-test-night"
 
 # Минимальный интервал проверки на бесплатном плане UptimeRobot - 5 минут.
 CHECK_INTERVAL = 300
 
+# Интервал дежурного монитора - раз в час.
+NIGHT_CHECK_INTERVAL = 3600
+
 # Таймаут запросов к API, секунды.
 REQUEST_TIMEOUT = 30
 
-# Как часто фоновый поток сверяет состояние монитора с нужным, секунды.
+# Как часто фоновый поток сверяет состояние мониторов с нужным, секунды.
 WORKER_INTERVAL = 300
 
 
@@ -70,10 +90,11 @@ class UptimeClient:
         self.api_key = (api_key or "").strip()
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        # ID найденного монитора запоминаем: список мониторов отдаёт
+        # ID найденных мониторов запоминаем: список мониторов отдаёт
         # в поле status результат последней проверки, а не признак паузы.
         # Честный статус (PAUSED) даёт только запрос по id.
         self._monitor_id = None
+        self._name_ids: dict[str, int] = {}
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         """Один запрос к API. Ошибки превращаются в UptimeError.
@@ -136,27 +157,49 @@ class UptimeClient:
         """
         return self._request("GET", f"/monitors/{monitor_id}")
 
-    def find_monitor(
-        self, url: str | None = None, name: str | None = None
-    ) -> dict | None:
-        """Найти монитор по адресу или по имени. None - если не найден."""
+    def find_by_name(self, name: str) -> dict | None:
+        """Найти монитор по имени (friendlyName). None - если не найден.
+
+        Имя надёжнее адреса: у основного и дежурного мониторов адрес один
+        и тот же, различаются они только именем. Найденный id запоминаем,
+        чтобы не переспрашивать список.
+        """
+        known_id = self._name_ids.get(name)
+        if known_id is not None:
+            try:
+                monitor = self.get_monitor(known_id)
+            except UptimeError:
+                monitor = None
+            if monitor and monitor.get("friendlyName") == name:
+                return monitor
+
+        for monitor in self.list_monitors():
+            if monitor.get("friendlyName") == name:
+                self._name_ids[name] = monitor.get("id")
+                return self.get_monitor(monitor.get("id"))
+        return None
+
+    def find_monitor(self, url: str | None = None, name: str | None = None) -> dict | None:
+        """Найти монитор по адресу или по имени. None - если не найден.
+
+        Поиск по адресу берёт первый подходящий, поэтому при двух
+        мониторах на одном адресе надёжнее искать по имени.
+        """
+        if name:
+            return self.find_by_name(name)
+
         if self._monitor_id is not None:
             try:
                 monitor = self.get_monitor(self._monitor_id)
             except UptimeError:
                 monitor = None
-            if monitor and (url is None or monitor.get("url") == url):
-                return monitor
-            if monitor and name and monitor.get("friendlyName") == name:
+            if monitor and (not url or monitor.get("url") == url):
                 return monitor
 
         for monitor in self.list_monitors():
             if url and monitor.get("url") == url:
                 self._monitor_id = monitor.get("id")
-                return self.get_monitor(self._monitor_id)
-            if name and monitor.get("friendlyName") == name:
-                self._monitor_id = monitor.get("id")
-                return self.get_monitor(self._monitor_id)
+                return self.get_monitor(monitor.get("id"))
         return None
 
     def create_monitor(
@@ -178,6 +221,7 @@ class UptimeClient:
         }
         monitor = self._request("POST", "/monitors", body)
         self._monitor_id = monitor.get("id")
+        self._name_ids[name] = monitor.get("id")
         return monitor
 
     def pause_monitor(self, monitor_id) -> dict:
@@ -192,6 +236,28 @@ class UptimeClient:
         """Состояние монитора: 'paused' или 'active'."""
         status = str(monitor.get("status") or "").upper()
         return "paused" if status == "PAUSED" else "active"
+
+    def ensure_monitor(
+        self,
+        name: str,
+        url: str,
+        interval: int,
+    ) -> dict | None:
+        """Найти монитор по имени или создать его. None - если не вышло.
+
+        Имя надёжнее адреса: у основного и дежурного мониторов адрес
+        один и тот же, различаются они только именем.
+        """
+        monitor = self.find_by_name(name)
+        if monitor:
+            return monitor
+        try:
+            return self.create_monitor(url=url, name=name, interval=interval)
+        except UptimeError as error:
+            # Монитор мог появиться между поиском и созданием.
+            if "009-011" in str(error):
+                return self.find_by_name(name)
+            raise
 
 
 # ---------- Когда монитор должен работать ----------
@@ -221,7 +287,7 @@ def tz_name() -> str:
 
 
 def desired_active(moment: datetime | None = None) -> bool:
-    """Должен ли монитор работать в этот момент.
+    """Должен ли основной монитор работать в этот момент.
 
     Днём (по умолчанию 07:00-23:00 по Киеву) - да: пинг держит контейнер
     awake. Ночью - нет: контейнер должен спать и не тратить часы тарифа.
@@ -248,6 +314,9 @@ def monitor_url() -> str:
     return (os.getenv("UPTIME_MONITOR_URL") or DEFAULT_MONITOR_URL).strip()
 
 
+# ---------- Синхронизация состояния ----------
+
+
 def apply_state(client: UptimeClient, monitor: dict, active: bool) -> str:
     """Привести уже найденный монитор в нужное состояние.
 
@@ -270,16 +339,42 @@ def sync_monitor(
     client: UptimeClient,
     active: bool,
     url: str | None = None,
+    name: str = MONITOR_NAME,
 ) -> str:
-    """Привести монитор в нужное состояние.
+    """Привести монитор в нужное состояние (поиск по имени).
 
     Возвращает: 'started' (сняли с паузы), 'paused' (поставили на паузу),
     'unchanged' (уже в нужном состоянии), 'missing' (монитора нет).
     """
-    monitor = client.find_monitor(url=url or monitor_url())
+    monitor = client.find_by_name(name)
     if not monitor:
         return "missing"
     return apply_state(client, monitor, active)
+
+
+def sync_all(
+    client: UptimeClient,
+    active: bool,
+    url: str | None = None,
+) -> dict:
+    """Свести оба монитора с нужным состоянием.
+
+    Основной монитор работает днём (active=True) и стоит на паузе ночью.
+    Дежурный монитор работает всегда: он раз в час будит контейнер,
+    и тот сам включает основной монитор, когда наступает утро.
+
+    Возвращает словарь с действиями по каждому монитору.
+    """
+    url = url or monitor_url()
+    result = {}
+
+    day = client.ensure_monitor(MONITOR_NAME, url, CHECK_INTERVAL)
+    result["day"] = apply_state(client, day, active) if day else "missing"
+
+    night = client.ensure_monitor(NIGHT_MONITOR_NAME, url, NIGHT_CHECK_INTERVAL)
+    result["night"] = apply_state(client, night, True) if night else "missing"
+
+    return result
 
 
 # ---------- Фоновый поток в контейнере ----------
@@ -288,11 +383,12 @@ _worker_thread = None
 _worker_lock = threading.Lock()
 
 # Состояние для /api/health: логи Render через API не читаются,
-# поэтому состояние монитора видно только здесь.
+# поэтому состояние мониторов видно только здесь.
 STATE = {
     "enabled": False,
     "status": "disabled",
     "monitor_status": "",
+    "night_monitor_status": "",
     "last_action": "",
     "updated_at": "",
     "error": "",
@@ -300,30 +396,27 @@ STATE = {
 
 
 def state() -> dict:
-    """Состояние монитора для /api/health."""
+    """Состояние мониторов для /api/health."""
     return dict(STATE)
 
 
 def _worker_loop(client: UptimeClient, url: str, interval: int) -> None:
-    """Следить за состоянием монитора, пока жив контейнер."""
-    from datetime import datetime
-
+    """Следить за состоянием мониторов, пока жив контейнер."""
     while True:
-        action = "missing"
         try:
             active = desired_active()
-            monitor = client.find_monitor(url=url)
-            if monitor:
-                STATE["monitor_status"] = monitor.get("status") or ""
-                action = apply_state(client, monitor, active)
-                STATE["status"] = "active" if active else "paused"
-                if action in ("started", "paused"):
-                    state_text = "включён" if active else "на паузе"
-                    print(f"⏱ UptimeRobot: монитор {state_text}", flush=True)
-            else:
-                STATE["status"] = "missing"
-            STATE["last_action"] = action
-            STATE["error"] = ""
+            actions = sync_all(client, active, url)
+
+            day = client.find_by_name(MONITOR_NAME)
+            night = client.find_by_name(NIGHT_MONITOR_NAME)
+            STATE["monitor_status"] = (day or {}).get("status") or ""
+            STATE["night_monitor_status"] = (night or {}).get("status") or ""
+            STATE["status"] = "active" if active else "paused"
+            STATE["last_action"] = actions.get("day", "missing")
+
+            if actions.get("day") in ("started", "paused"):
+                state_text = "включён" if active else "на паузе"
+                print(f"⏱ UptimeRobot: основной монитор {state_text}", flush=True)
         except Exception as exc:  # noqa: BLE001 - поток не должен умирать
             STATE["status"] = "error"
             STATE["error"] = f"{type(exc).__name__}: {exc}"[:200]
@@ -337,7 +430,7 @@ def start_worker(
     url: str | None = None,
     interval: int = WORKER_INTERVAL,
 ) -> bool:
-    """Запустить фоновый поток, который управляет паузой монитора.
+    """Запустить фоновый поток, который управляет мониторами.
 
     Без ключа API (UPTIME_API_KEY) ничего не запускается - сервис работает
     как раньше. Возвращает True, если поток запущен.

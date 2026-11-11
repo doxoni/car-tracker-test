@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Управление монитором UptimeRobot (пинг днём, пауза ночью).
+"""Управление мониторами UptimeRobot (пинг днём, пауза ночью).
 
 Команды (PowerShell, из папки проекта):
-    python uptime_monitor.py setup    # создать монитор, если его нет
-    python uptime_monitor.py status   # показать состояние монитора
-    python uptime_monitor.py pause    # поставить монитор на паузу
-    python uptime_monitor.py start    # снять монитор с паузы
+    python uptime_monitor.py setup    # создать оба монитора, если их нет
+    python uptime_monitor.py status   # показать состояние мониторов
+    python uptime_monitor.py pause    # поставить основной монитор на паузу
+    python uptime_monitor.py start    # снять основной монитор с паузы
     python uptime_monitor.py auto     # включить/выключить по киевскому времени
 
 Ключ API берётся из переменной окружения UPTIME_API_KEY или из файла
 uptime_key.txt (файл в .gitignore - в Git ключ не попадает).
 
-Зачем пауза ночью:
+Зачем два монитора:
     Бесплатный Render даёт 750 инстанс-часов в месяц, а монитор с
     включённым пингом держал бы контейнер awake круглые сутки (744 часа
-    в 31-дневном месяце). С паузой ночью контейнер спит и часы не тратятся.
+    в 31-дневный месяц). С паузой ночью контейнер спит и часы не тратятся.
+    Дежурный монитор (раз в час) будит контейнер ночью, а утром контейнер
+    сам включает основной пинг - так сервис просыпается без участия
+    GitHub Actions (его расписание на этом репозитории опаздывает на часы).
 """
 
 import argparse
@@ -38,11 +41,15 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "app"))
 
 from uptime import (  # noqa: E402 - путь добавили выше
+    CHECK_INTERVAL,
     MONITOR_NAME,
+    NIGHT_CHECK_INTERVAL,
+    NIGHT_MONITOR_NAME,
     UptimeClient,
     UptimeError,
     desired_active,
     monitor_url,
+    sync_all,
     sync_monitor,
 )
 
@@ -89,55 +96,78 @@ def show_monitor(monitor: dict) -> None:
 
 
 def cmd_setup(client: UptimeClient, args) -> int:
-    """Создать монитор, если такого ещё нет."""
+    """Создать мониторы, если таких ещё нет."""
     url = args.url or monitor_url()
-    monitor = client.find_monitor(url=url) or client.find_monitor(name=MONITOR_NAME)
-    if monitor:
-        print("Монитор уже есть:")
-        show_monitor(monitor)
-        return 0
 
-    monitor = client.create_monitor(url=url, name=MONITOR_NAME)
-    print("Монитор создан:")
-    show_monitor(monitor)
+    day = client.ensure_monitor(MONITOR_NAME, url, CHECK_INTERVAL)
+    if day:
+        print("Основной монитор (5 минут, днём):")
+        show_monitor(day)
+    else:
+        print("Основной монитор не удалось создать.")
+
+    night = client.ensure_monitor(NIGHT_MONITOR_NAME, url, NIGHT_CHECK_INTERVAL)
+    if night:
+        print("")
+        print("Дежурный монитор (1 час, работает всегда):")
+        show_monitor(night)
+    else:
+        print("")
+        print("Дежурный монитор не удалось создать.")
     return 0
 
 
 def cmd_status(client: UptimeClient, args) -> int:
-    """Показать состояние монитора."""
-    monitor = client.find_monitor(url=args.url or monitor_url())
-    if not monitor:
-        print("Монитор не найден. Создай его: python uptime_monitor.py setup")
+    """Показать состояние мониторов."""
+    day = client.find_by_name(MONITOR_NAME)
+    if not day:
+        print("Основной монитор не найден. Создай его: python uptime_monitor.py setup")
         return 1
-    show_monitor(monitor)
+
+    print("Основной монитор (5 минут, днём):")
+    show_monitor(day)
+
+    night = client.find_by_name(NIGHT_MONITOR_NAME)
+    print("")
+    if night:
+        print("Дежурный монитор (1 час, работает всегда):")
+        show_monitor(night)
+    else:
+        print("Дежурный монитор не найден. Создай его: python uptime_monitor.py setup")
+
+    print("")
     print(f"  сейчас:  {'день - пинг нужен' if desired_active() else 'ночь - пинг не нужен'}")
     return 0
 
 
 def cmd_pause(client: UptimeClient, args) -> int:
-    """Поставить монитор на паузу."""
-    action = sync_monitor(client, False, args.url or monitor_url())
-    print(f"Монитор: {action}")
+    """Поставить основной монитор на паузу."""
+    action = sync_monitor(
+        client, False, args.url or monitor_url(), name=MONITOR_NAME
+    )
+    print(f"Основной монитор: {action}")
     return 0
 
 
 def cmd_start(client: UptimeClient, args) -> int:
-    """Снять монитор с паузы."""
-    action = sync_monitor(client, True, args.url or monitor_url())
-    print(f"Монитор: {action}")
+    """Снять основной монитор с паузы."""
+    action = sync_monitor(client, True, args.url or monitor_url(), name=MONITOR_NAME)
+    print(f"Основной монитор: {action}")
     return 0
 
 
 def cmd_auto(client: UptimeClient, args) -> int:
-    """Включить или выключить монитор по киевскому времени."""
+    """Включить или выключить мониторы по киевскому времени."""
     active = desired_active()
-    action = sync_monitor(client, active, args.url or monitor_url())
-    print(f"{'день' if active else 'ночь'}: монитор {action}")
+    actions = sync_all(client, active, args.url or monitor_url())
+    print(f"{'день' if active else 'ночь'}:")
+    print(f"  основной монитор: {actions.get('day')}")
+    print(f"  дежурный монитор: {actions.get('night')}")
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Управление монитором UptimeRobot")
+    parser = argparse.ArgumentParser(description="Управление мониторами UptimeRobot")
     parser.add_argument(
         "command",
         choices=["setup", "status", "pause", "start", "auto"],

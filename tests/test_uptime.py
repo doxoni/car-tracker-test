@@ -207,13 +207,32 @@ def test_http_error_becomes_uptime_error(monkeypatch):
 class _FakeClient:
     """Клиент-заглушка: запоминает вызовы паузы и запуска."""
 
-    def __init__(self, monitor=None):
+    def __init__(self, monitor=None, night=None):
         self.monitor = monitor
+        self.night = night
         self.paused = []
         self.started = []
 
+    def find_by_name(self, name):
+        if name == uptime.MONITOR_NAME:
+            return self.monitor
+        if name == uptime.NIGHT_MONITOR_NAME:
+            return self.night
+        return None
+
     def find_monitor(self, url=None, name=None):
-        return self.monitor
+        return self.find_by_name(name) if name else self.monitor
+
+    def ensure_monitor(self, name, url, interval):
+        found = self.find_by_name(name)
+        if found:
+            return found
+        created = {"id": 99, "friendlyName": name, "status": "UP", "interval": interval}
+        if name == uptime.MONITOR_NAME:
+            self.monitor = created
+        else:
+            self.night = created
+        return created
 
     def monitor_state(self, monitor):
         return "paused" if monitor.get("status") == "PAUSED" else "active"
@@ -276,6 +295,157 @@ def test_apply_state_uses_already_found_monitor():
     assert action == "paused"
     assert client.paused == [9]
     assert calls == []
+
+
+# ---------- Два монитора: поиск по имени и синхронизация ----------
+
+DAY_ID = 111
+NIGHT_ID = 222
+
+
+def _two_monitors_handler(request):
+    """Ответ API для двух мониторов с одинаковым адресом."""
+    url = request.full_url
+    if f"/monitors/{DAY_ID}" in url:
+        return _Response(
+            {
+                "id": DAY_ID,
+                "friendlyName": uptime.MONITOR_NAME,
+                "url": "https://example.com/health",
+                "status": "PAUSED",
+                "interval": 300,
+            }
+        )
+    if f"/monitors/{NIGHT_ID}" in url:
+        return _Response(
+            {
+                "id": NIGHT_ID,
+                "friendlyName": uptime.NIGHT_MONITOR_NAME,
+                "url": "https://example.com/health",
+                "status": "UP",
+                "interval": 3600,
+            }
+        )
+    return _Response(
+        {
+            "data": [
+                {
+                    "id": DAY_ID,
+                    "friendlyName": uptime.MONITOR_NAME,
+                    "url": "https://example.com/health",
+                    "status": "UP",
+                },
+                {
+                    "id": NIGHT_ID,
+                    "friendlyName": uptime.NIGHT_MONITOR_NAME,
+                    "url": "https://example.com/health",
+                    "status": "UP",
+                },
+            ]
+        }
+    )
+
+
+def test_find_by_name_separates_monitors_with_same_url(monkeypatch):
+    """Мониторы с одинаковым адресом различаются по имени."""
+    _patch_urlopen(monkeypatch, _two_monitors_handler)
+    client = UptimeClient("key")
+
+    day = client.find_by_name(uptime.MONITOR_NAME)
+    night = client.find_by_name(uptime.NIGHT_MONITOR_NAME)
+
+    assert day["id"] == DAY_ID
+    assert night["id"] == NIGHT_ID
+    assert day["status"] == "PAUSED"
+
+
+def test_find_by_name_remembers_id(monkeypatch):
+    """Найденный id запоминаем - список больше не переспрашиваем."""
+    urls = []
+    handler = _two_monitors_handler
+
+    def _handler(request):
+        urls.append(request.full_url)
+        return handler(request)
+
+    _patch_urlopen(monkeypatch, _handler)
+    client = UptimeClient("key")
+
+    client.find_by_name(uptime.MONITOR_NAME)
+    list_calls = len([url for url in urls if url.endswith("limit=50")])
+    client.find_by_name(uptime.MONITOR_NAME)
+
+    assert list_calls == 1
+
+
+def test_ensure_monitor_creates_missing(monkeypatch):
+    """Если монитора нет - он создаётся с нужным интервалом."""
+    calls = _patch_urlopen(monkeypatch, lambda request: _Response({"data": []}))
+
+    client = UptimeClient("key")
+    monitor = client.ensure_monitor(
+        uptime.NIGHT_MONITOR_NAME, "https://example.com/health", 3600
+    )
+
+    assert monitor is not None
+    body = json.loads(calls[-1].data.decode("utf-8"))
+    assert body["friendlyName"] == uptime.NIGHT_MONITOR_NAME
+    assert body["interval"] == 3600
+
+
+def test_ensure_monitor_keeps_existing(monkeypatch):
+    """Существующий монитор не пересоздаём."""
+    _patch_urlopen(monkeypatch, _two_monitors_handler)
+    calls = _patch_urlopen(monkeypatch, _two_monitors_handler)
+
+    client = UptimeClient("key")
+    monitor = client.ensure_monitor(
+        uptime.MONITOR_NAME, "https://example.com/health", 300
+    )
+
+    assert monitor["id"] == DAY_ID
+    assert not any(request.method == "POST" for request in calls)
+
+
+def test_sync_all_day_and_night():
+    """Днём основной включается, дежурный всегда работает."""
+    client = _FakeClient(
+        monitor={"id": 1, "status": "PAUSED"},
+        night={"id": 2, "status": "UP"},
+    )
+
+    actions = uptime.sync_all(client, True)
+
+    assert actions["day"] == "started"
+    assert actions["night"] == "unchanged"
+    assert client.started == [1]
+
+
+def test_sync_all_at_night_pauses_day_only():
+    """Ночью основной монитор на паузе, дежурный продолжает работать."""
+    client = _FakeClient(
+        monitor={"id": 1, "status": "UP"},
+        night={"id": 2, "status": "UP"},
+    )
+
+    actions = uptime.sync_all(client, False)
+
+    assert actions["day"] == "paused"
+    assert actions["night"] == "unchanged"
+    assert client.paused == [1]
+
+
+def test_sync_all_creates_missing_monitors():
+    """Нет мониторов - создаются и сразу приводятся в нужное состояние."""
+    client = _FakeClient()
+
+    actions = uptime.sync_all(client, True)
+
+    assert actions["day"] == "unchanged"
+    assert actions["night"] == "unchanged"
+    assert client.monitor["friendlyName"] == uptime.MONITOR_NAME
+    assert client.night["friendlyName"] == uptime.NIGHT_MONITOR_NAME
+    assert client.night["interval"] == uptime.NIGHT_CHECK_INTERVAL
 
 
 # ---------- Фоновый поток ----------
