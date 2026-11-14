@@ -29,11 +29,61 @@ def _parse_init_data():
     request.init_data = {k: v[0] for k, v in parsed.items()}
 
 
+def _db_retry_loop(app, delay: float = 5.0):
+    """Фоновый поток: повторяет приведение схемы, пока БД не ответит.
+
+    Нужен, когда база заснула или мигрировала: приложение при этом уже
+    поднято и отвечает на запросы, а схема дотянется сама.
+    """
+    import time
+
+    from sqlalchemy.exc import OperationalError
+
+    while True:
+        time.sleep(delay)
+        try:
+            with app.app_context():
+                from app.db_schema import ensure_schema
+
+                ensure_schema(app)
+            print("✅ Схема БД приведена в порядок")
+            return
+        except OperationalError as e:
+            try:
+                print(f"⚠️ БД всё ещё недоступна: {e}")
+            except Exception:
+                pass
+        except Exception as e:  # noqa: BLE001 - фон не должен падать
+            try:
+                print(f"⚠️ Не удалось привести схему БД: {e}")
+            except Exception:
+                pass
+            return
+
+
+def _start_db_retry_thread(app, delay: float = 5.0):
+    """Запустить фоновый поток с повторными попытками подключиться к БД."""
+    import threading
+
+    thread = threading.Thread(
+        target=_db_retry_loop,
+        args=(app, delay),
+        name="db-schema-retry",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _init_db(app, attempts: int = 10, delay: float = 5.0):
     """Привести схему БД в порядок, дожидаясь готовности базы.
 
     Cloud SQL может быть ещё не готов к первому подключению после деплоя,
     поэтому повторяем попытки с задержкой.
+
+    Если база не отвечает после всех попыток, приложение всё равно
+    поднимаем: упавший контейнер означает 503 для всех, а поднятое
+    приложение отвечает на /api/health и дотягивает схему в фоне.
     """
     import time
     from sqlalchemy.exc import OperationalError
@@ -54,7 +104,12 @@ def _init_db(app, attempts: int = 10, delay: float = 5.0):
             except Exception:
                 pass
             if attempt == attempts:
-                raise
+                try:
+                    print("⚠️ БД недоступна - поднимаем сайт без неё, схему дотянем в фоне")
+                except Exception:
+                    pass
+                _start_db_retry_thread(app, delay=delay)
+                return
             time.sleep(delay)
 
 

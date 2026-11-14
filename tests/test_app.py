@@ -170,6 +170,40 @@ def test_wait_until_morning_skips_when_not_suspended(monkeypatch):
     assert called == []
 
 
+def test_app_survives_unavailable_database(monkeypatch):
+    """Если БД не отвечает, приложение всё равно поднимается.
+
+    Иначе контейнер падает на старте, Render отдаёт 503 и сервис
+    остаётся лежать до вмешательства вручную.
+    """
+    import time
+
+    from flask import Flask
+    from sqlalchemy.exc import OperationalError
+
+    import app as app_module
+    import app.db_schema as db_schema
+
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        db_schema,
+        "ensure_schema",
+        lambda application: (_ for _ in ()).throw(
+            OperationalError("SELECT 1", {}, Exception("БД недоступна"))
+        ),
+    )
+    started = []
+    monkeypatch.setattr(
+        app_module, "_start_db_retry_thread", lambda application, delay=5.0: started.append(True)
+    )
+
+    application = Flask(__name__)
+    app_module._init_db(application, attempts=2, delay=0)
+
+    # Исключения не вылетели, фоновый поток запущен.
+    assert started == [True]
+
+
 def test_restart_stops_and_starts_service(monkeypatch):
     """Перезапуск зависшего сервиса: сначала остановка, потом запуск."""
     import night_sleep
