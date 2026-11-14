@@ -170,6 +170,55 @@ def test_wait_until_morning_skips_when_not_suspended(monkeypatch):
     assert called == []
 
 
+def test_restart_stops_and_starts_service(monkeypatch):
+    """Перезапуск зависшего сервиса: сначала остановка, потом запуск."""
+    import night_sleep
+
+    calls = []
+
+    monkeypatch.setattr(
+        night_sleep, "service_state", lambda key: {"suspended": "not_suspended"}
+    )
+    monkeypatch.setattr(night_sleep, "last_deploy", lambda key: {"status": "live"})
+    monkeypatch.setattr(night_sleep.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(night_sleep, "say", lambda text: None)
+    monkeypatch.setattr(
+        night_sleep,
+        "api",
+        lambda method, path, key, payload=None: (calls.append((method, path)), (200, {}))[1],
+    )
+
+    # Health не отвечает - проверяем только вызовы API Render.
+    def _no_response(*args, **kwargs):
+        raise OSError("сервис не отвечает")
+
+    monkeypatch.setattr(night_sleep.urllib.request, "urlopen", _no_response)
+
+    assert night_sleep.cmd_restart("test-key") == 0
+    assert ("POST", f"/services/{night_sleep.SERVICE_ID}/suspend") in calls
+    assert ("POST", f"/services/{night_sleep.SERVICE_ID}/resume") in calls
+
+
+def test_restart_skipped_while_deploy_running(monkeypatch):
+    """Пока идёт деплой, сервис не перезапускаем - деплой может сорваться."""
+    import night_sleep
+
+    calls = []
+    monkeypatch.setattr(
+        night_sleep, "service_state", lambda key: {"suspended": "not_suspended"}
+    )
+    monkeypatch.setattr(night_sleep, "last_deploy", lambda key: {"status": "building"})
+    monkeypatch.setattr(night_sleep, "say", lambda text: None)
+    monkeypatch.setattr(
+        night_sleep,
+        "api",
+        lambda method, path, key, payload=None: (calls.append((method, path)), (200, {}))[1],
+    )
+
+    assert night_sleep.cmd_restart("test-key") == 0
+    assert calls == []
+
+
 def test_health_db(client):
     """Отдельная проверка БД реально ходит в базу."""
     response = client.get("/api/health/db")

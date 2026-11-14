@@ -1,18 +1,22 @@
 # Keep-alive сервиса car-tracker-test.
 #
-# Раньше этот workflow пинговал сервис днём по расписанию GitHub Actions.
-# Теперь дневной пинг делает монитор UptimeRobot (см. workflow
-# uptime-monitor и app/uptime.py), а GitHub нужен только как страховка:
-# он включает и выключает сам монитор (по фактическому киевскому времени),
-# а сам сервис больше не пингует.
+# Страховка на случай, если сервис на Render не отвечает. Случалось так:
+# 13.11.2026 ночью Render перестал создавать инстанс, и сервис не отвечал
+# 14,5 часа (503), пока Render сам не ожил. Монитор UptimeRobot в такой
+# ситуации бессилен - он только видит 503.
 #
-# Осталось ручное запускание: если нужно разбудить сервис прямо сейчас -
-# запусти этот workflow вручную (Actions -> keep-alive -> Run workflow).
-# Скрипт keepalive.py пингует сервис только в дневное окно 07:00-23:00
-# по Киеву, ночью пинга не будет.
+# Поэтому GitHub Actions раз в 10 минут проверяет живость сервиса и, если
+# тот не отвечает, поднимает его через API Render:
+#   1) resume - если сервис оказался жёстко усыпленным;
+#   2) restart (suspend + resume) - если сервис "залип" и не отвечает.
+#
+# Ночью (01:45-05:00 по Киеву) пинг пропускаем: контейнер должен спать,
+# чтобы не тратить инстанс-часы бесплатного тарифа.
 name: keep-alive
 
 on:
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -20,9 +24,54 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Забрать скрипт
+      - name: Забрать скрипты
         uses: actions/checkout@v4
 
-      - name: Пинговать сервис в дневное окно
+      - name: Проверить киевское время
+        id: clock
         run: |
-          python3 keepalive.py
+          echo "time=$(TZ=Europe/Kyiv date +%H%M)" >> "$GITHUB_OUTPUT"
+          echo "Киев: $(TZ=Europe/Kyiv date '+%Y-%m-%d %H:%M:%S')"
+
+      - name: Ночное окно - не будим сервис
+        if: steps.clock.outputs.time >= '0145' && steps.clock.outputs.time < '0500'
+        run: echo "Ночное окно - пинг пропускаем."
+
+      - name: Проверить живость сервиса
+        if: steps.clock.outputs.time < '0145' || steps.clock.outputs.time >= '0500'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          set -u
+          URL="https://car-tracker-test.onrender.com/api/health"
+
+          ping() {
+            curl -s -o /dev/null -w '%{http_code}' --max-time 45 \
+              --retry 2 --retry-delay 10 --retry-all-errors "$URL" || echo "000"
+          }
+
+          CODE=$(ping)
+          if [ "$CODE" = "200" ]; then
+            echo "Сервис жив."
+            exit 0
+          fi
+          echo "Сервис не отвечает (код $CODE) - будим через API Render."
+
+          python3 night_sleep.py resume || true
+
+          CODE=$(ping)
+          if [ "$CODE" = "200" ]; then
+            echo "Сервис поднят."
+            exit 0
+          fi
+
+          echo "Resume не помог - перезапускаем сервис целиком."
+          python3 night_sleep.py restart || true
+
+          CODE=$(ping)
+          if [ "$CODE" = "200" ]; then
+            echo "Сервис перезапущен, отвечает."
+            exit 0
+          fi
+          echo "Сервис не отвечает - ждём следующей попытки."
+          exit 0

@@ -14,6 +14,7 @@
 Команды:
     python night_sleep.py suspend   # усыпить сервис (жёсткая остановка)
     python night_sleep.py resume    # разбудить сервис
+    python night_sleep.py restart   # перезапустить зависший сервис
     python night_sleep.py wait_until_morning  # дождаться 05:00 и разбудить
     python night_sleep.py auto      # само решить по киевскому времени
     python night_sleep.py status    # показать состояние (без секретов)
@@ -235,6 +236,61 @@ def cmd_resume(key: str) -> int:
     return 0
 
 
+def cmd_restart(key: str) -> int:
+    """Перезапустить сервис: жёсткая остановка и запуск заново.
+
+    Нужно, когда сервис не отвечает, но не усыплен: Render отдаёт 503 и
+    не создаёт инстанс (было 13-14.11.2026 - сервис лежал 14,5 часа).
+    Единственный способ сбросить такое состояние - остановить сервис
+    через API и запустить заново.
+
+    Осторожно: если сейчас идёт деплой, сервис не трогаем - деплой
+    может сорваться. Поэтому при незавершённом деплое просто выходим.
+    """
+    state = service_state(key)
+    if not state:
+        say("❌ Не удалось получить состояние сервиса")
+        return 1
+
+    if state.get("suspended") == "suspended":
+        say("ℹ️ Сервис усыплён - достаточно разбудить")
+        return cmd_resume(key)
+
+    deploy = last_deploy(key)
+    status = deploy.get("status", "")
+    if status and status != "live":
+        say(f"⏳ Деплой в статусе {status} - сервис не трогаем")
+        return 0
+
+    code, data = api("POST", f"/services/{SERVICE_ID}/suspend", key)
+    if code >= 400:
+        say(f"❌ Не удалось остановить сервис: {code} {str(data)[:200]}")
+        return 1
+    say("⏸ Сервис остановлен (код {code})".format(code=code))
+
+    # Даём Render время убрать старый инстанс, иначе новый не создастся.
+    time.sleep(15)
+
+    code, data = api("POST", f"/services/{SERVICE_ID}/resume", key)
+    if code >= 400:
+        say(f"❌ Не удалось запустить сервис: {code} {str(data)[:200]}")
+        return 1
+    say("▶️ Сервис запущен (код {code})".format(code=code))
+
+    for attempt in range(1, 31):
+        try:
+            request = urllib.request.Request(HEALTH_URL, method="GET")
+            with urllib.request.urlopen(request, timeout=30) as response:
+                if response.status == 200:
+                    say(f"✅ Сервис отвечает (попытка {attempt})")
+                    return 0
+        except Exception:
+            pass
+        time.sleep(10)
+    say("⚠️ Сервис пока не отвечает - он поднимается с задержкой")
+    return 0
+
+
 def cmd_auto(key: str) -> int:
     """Самостоятельно привести сервис в нужное состояние.
 
@@ -320,6 +376,8 @@ def main() -> int:
         return cmd_suspend(key)
     if command == "resume":
         return cmd_resume(key)
+    if command == "restart":
+        return cmd_restart(key)
     if command == "wait_until_morning":
         return cmd_wait_until_morning(key)
     if command == "auto":
@@ -327,7 +385,7 @@ def main() -> int:
     if command == "status":
         return cmd_status(key)
     say(
-        "❌ Неизвестная команда. Доступны: suspend, resume, "
+        "❌ Неизвестная команда. Доступны: suspend, resume, restart, "
         "wait_until_morning, auto, status"
     )
     return 1
