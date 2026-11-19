@@ -43,10 +43,15 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
           set -u
-          URL="https://car-tracker-test.onrender.com/api/health"
+          URL="https://car-tracker-test.onrender.com/"
+          # Браузерный User-Agent: Render free не будит контейнер по
+          # запросам ботов (анти-абьюз), а заход "браузера" на страницу
+          # Mini App - будит.
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
           ping() {
             curl -s -o /dev/null -w '%{http_code}' --max-time 45 \
+              -A "$UA" \
               --retry 2 --retry-delay 10 --retry-all-errors "$URL" || echo "000"
           }
 

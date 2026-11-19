@@ -14,6 +14,10 @@
 тратятся, а утром его поднимет любое обращение (Mini App или сообщение
 в боте).
 
+Пингуется сама страница Mini App (`/`) с браузерными заголовками, а не
+`/api/health`: замечено, что Render free не будит контейнер по запросам
+ботов (анти-абьюз), а реальный заход в Mini App - будит.
+
 Запуск (PowerShell, из папки проекта):
     python keepalive.py
 
@@ -30,7 +34,22 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-HEALTH_URL = "https://car-tracker-test.onrender.com/api/health"
+# Страница Mini App, а не /api/health (см. docstring).
+PAGE_URL = "https://car-tracker-test.onrender.com/"
+
+# Браузерные заголовки: с ними запрос проходит как заход настоящего
+# пользователя, и Render будит контейнер.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ),
+}
+
 TZ_NAME = os.getenv("KEEPALIVE_TZ", "Europe/Kyiv")
 START_HOUR = int(os.getenv("KEEPALIVE_START_HOUR", "7"))
 END_HOUR = int(os.getenv("KEEPALIVE_END_HOUR", "23"))
@@ -61,14 +80,14 @@ def _sleep(seconds: int) -> None:
     time.sleep(seconds)
 
 
-def ping(url: str = HEALTH_URL, timeout: int = 90, attempts: int = 3) -> bool:
+def ping(url: str = PAGE_URL, timeout: int = 90, attempts: int = 3) -> bool:
     """Проверить, что сервис отвечает.
 
     Первый запрос к спящему контейнеру обычно не доходит до приложения:
     Render показывает страницу "SERVICE WAKING UP" и отдаёт 503, пока
     контейнер поднимается (это занимает до минуты). Поэтому повторяем.
     """
-    request = urllib.request.Request(url, headers={"User-Agent": "car-tracker-keepalive"})
+    request = urllib.request.Request(url, headers=dict(BROWSER_HEADERS))
     for attempt in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:

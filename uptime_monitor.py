@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "app"))
 
 from uptime import (  # noqa: E402 - путь добавили выше
+    BROWSER_HEADERS,
     CHECK_INTERVAL,
     MONITOR_NAME,
     NIGHT_CHECK_INTERVAL,
@@ -170,14 +171,41 @@ def cmd_auto(client: UptimeClient, args) -> int:
     return 0
 
 
+def cmd_retune(client: UptimeClient, args) -> int:
+    """Подтянуть существующие мониторы к текущим настройкам.
+
+    Меняет URL (страница Mini App вместо /api/health), интервал и
+    браузерные заголовки. Нужно после изменения настроек по умолчанию:
+    ensure_monitor находит монитор по имени и старые URL/заголовки не
+    трогает.
+    """
+    targets = [
+        (MONITOR_NAME, args.url or monitor_url(), CHECK_INTERVAL),
+        (NIGHT_MONITOR_NAME, night_monitor_url(), NIGHT_CHECK_INTERVAL),
+    ]
+    for name, url, interval in targets:
+        monitor = client.find_by_name(name)
+        if not monitor:
+            print(f"{name}: монитор не найден, создай через setup")
+            continue
+        client.update_monitor(
+            monitor.get("id"),
+            url=url,
+            interval=interval,
+            customHttpHeaders=dict(BROWSER_HEADERS),
+        )
+        print(f"{name}: обновлён (url={url}, интервал={interval} с)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Управление мониторами UptimeRobot")
     parser.add_argument(
         "command",
-        choices=["setup", "status", "pause", "start", "auto"],
+        choices=["setup", "status", "pause", "start", "auto", "retune"],
         help="что сделать",
     )
-    parser.add_argument("--url", default="", help="адрес монитора (по умолчанию - health)")
+    parser.add_argument("--url", default="", help="адрес монитора (по умолчанию - страница Mini App)")
     args = parser.parse_args()
 
     client = make_client()
@@ -187,6 +215,7 @@ def main() -> int:
         "pause": cmd_pause,
         "start": cmd_start,
         "auto": cmd_auto,
+        "retune": cmd_retune,
     }
     try:
         return handlers[args.command](client, args)

@@ -7,8 +7,8 @@
     бесплатного тарифа - 750 часов в месяц (31 день x 24 часа = 744,
     поэтому сервис, работающий круглые сутки, в конце месяца исчерпывает
     лимит). Поэтому:
-      - днём монитор UptimeRobot пингует /api/health раз в 5 минут и держит
-        контейнер awake - Mini App открывается сразу;
+      - днём монитор UptimeRobot пингует страницу Mini App раз в 5 минут и
+        держит контейнер awake - Mini App открывается сразу;
       - ночью монитор стоит на паузе - пингов нет, контейнер засыпает сам
         и часы не тратятся.
 
@@ -43,7 +43,13 @@ from zoneinfo import ZoneInfo
 # ---------- Настройки ----------
 
 API_BASE = "https://api.uptimerobot.com/v3"
-DEFAULT_MONITOR_URL = "https://car-tracker-test.onrender.com/api/health"
+
+# Страница Mini App, а не /api/health. Замечено: Render free не будит
+# контейнер по запросам uptime-ботов (анти-абьюз) - пинги /api/health
+# возвращали loading page 503 и не поднимали сервис. Реальный заход в
+# Mini App (браузер, страница "/") контейнер будит. Поэтому монитор
+# стучится в саму страницу с браузерными заголовками (см. create_monitor).
+DEFAULT_MONITOR_URL = "https://car-tracker-test.onrender.com/"
 
 # Основной монитор: пингует сервис раз в 5 минут днём и держит контейнер
 # awake. Ночью стоит на паузе.
@@ -66,6 +72,19 @@ REQUEST_TIMEOUT = 30
 
 # Как часто фоновый поток сверяет состояние мониторов с нужным, секунды.
 WORKER_INTERVAL = 300
+
+# Браузерные заголовки для мониторов: Render free может не будить контейнер
+# по запросам uptime-ботов (анти-абьюз), а браузерный User-Agent проходит.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ),
+}
 
 
 class UptimeError(Exception):
@@ -218,6 +237,10 @@ class UptimeClient:
             "timeout": 60,
             # Несколько минут на то, чтобы сервис проснулся после сна.
             "gracePeriod": 300,
+            # Прикидываемся обычным браузером: Render free может не будить
+            # контейнер по запросам uptime-ботов (анти-абьюз), а браузерный
+            # User-Agent проходит и поднимает сервис.
+            "customHttpHeaders": dict(BROWSER_HEADERS),
         }
         monitor = self._request("POST", "/monitors", body)
         self._monitor_id = monitor.get("id")
@@ -231,6 +254,17 @@ class UptimeClient:
     def start_monitor(self, monitor_id) -> dict:
         """Снять монитор с паузы (идемпотентно)."""
         return self._request("POST", f"/monitors/{monitor_id}/start", {})
+
+    def update_monitor(self, monitor_id, **fields) -> dict:
+        """Изменить настройки монитора (URL, интервал, заголовки).
+
+        Нужно, чтобы подтянуть уже созданные мониторы к новым настройкам:
+        ensure_monitor находит монитор по имени и URL/заголовки не трогает.
+        """
+        body = {key: value for key, value in fields.items() if value is not None}
+        if not body:
+            return {}
+        return self._request("PATCH", f"/monitors/{monitor_id}", body)
 
     def monitor_state(self, monitor: dict) -> str:
         """Состояние монитора: 'paused' или 'active'."""
